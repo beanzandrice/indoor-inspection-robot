@@ -102,10 +102,10 @@ nano config/bridge.env
 
 Set `PI_HOST`, `PI_USER`, `GO2_HOST`, and `GO2_USER` for the current network. Do not put passwords in this file.
 
-The default RViz display support also enables the Go2 camera and robot model:
+The default RViz display support enables the robot model and keeps Go2 video disabled unless the Go2 video publisher is installed:
 
 ```bash
-GO2_VIDEO_ENABLE=true
+GO2_VIDEO_ENABLE=false
 GO2_VIDEO_FPS=10
 GO2_RVIZ_IMAGE_MAX_HZ=5.0
 GO2_RVIZ_POINTCLOUD_MAX_HZ=2.0
@@ -306,14 +306,14 @@ If that file is missing or you want a different model, set `GO2_URDF` in `config
 
 ### Camera feed does not appear
 
-Confirm the GO2 terminal shows that video is enabled. The wrappers default to:
+The wrappers default to video disabled because some Go2 installs do not include `video_stream_node.py` in the `go2_core` package:
 
 ```bash
-GO2_VIDEO_ENABLE=true
+GO2_VIDEO_ENABLE=false
 GO2_VIDEO_FPS=10
 ```
 
-Then verify the bridge status includes `/camera/image_raw`. If the hotspot is overloaded, lower the image relay rate:
+Only set `GO2_VIDEO_ENABLE=true` after confirming the Go2 can run the `go2_core` video publisher. Then verify the bridge status includes `/camera/image_raw`. If the hotspot is overloaded, lower the image relay rate:
 
 ```bash
 GO2_RVIZ_IMAGE_MAX_HZ=2.0

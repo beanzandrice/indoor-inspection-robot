@@ -43,7 +43,7 @@ done
 : "${GO2_RVIZ_GOAL_MODE:=action}"
 : "${GO2_RVIZ_IMAGE_MAX_HZ:=5.0}"
 : "${GO2_RVIZ_POINTCLOUD_MAX_HZ:=2.0}"
-: "${GO2_VIDEO_ENABLE:=true}"
+: "${GO2_VIDEO_ENABLE:=false}"
 : "${GO2_VIDEO_FPS:=10}"
 
 ros2 launch go2_navigation go2_live_mapping_stack.launch.py \
