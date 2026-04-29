@@ -36,11 +36,14 @@ scripts/
   install_go2_project.sh          Copies and rebuilds the GO2-side project
   start_tunnels.sh                Opens SSH tunnels through the Pi to the GO2
   start_laptop_rviz.sh            Starts laptop receiver and RViz2
+  start_laptop_isaacsim.sh        Starts laptop receiver and Isaac Sim viewer
   start_go2_nav_over_ssh.sh       Starts static-map navigation on the GO2
   start_go2_live_mapping_over_ssh.sh
                                    Starts live mapping navigation on the GO2
   laptop_rviz_receiver.py         Laptop-side bridge receiver and command forwarder
   go2_robot_model_publisher.py    Laptop-side Go2 URDF and neutral TF publisher
+isaac/
+  go2_live_nav_viewer.py          Isaac Sim viewer for map, robot pose, scan, and point cloud
 rviz/
   go2_navigation.rviz             RViz display configuration
 robot_description/
@@ -63,6 +66,7 @@ go2_scripts/
 
 - Ubuntu with ROS 2 installed. The scripts try `/opt/ros/humble/setup.bash` first and then `/opt/ros/foxy/setup.bash`.
 - `rviz2`
+- Optional: Isaac Sim 4.5 extracted at `/home/nortiz01/isaacsim`, or set `ISAACSIM_ROOT` before running the Isaac viewer.
 - Python 3
 - SSH access to the Raspberry Pi 3
 - Network route from the Pi to the Go2
@@ -164,6 +168,19 @@ cd ~/go2-navigation-rviz-project
 This starts `laptop_rviz_receiver.py` and opens RViz2 with `rviz/go2_navigation.rviz`.
 It also starts `go2_robot_model_publisher.py`, which publishes `/robot_description` and the fixed Go2 model transforms from `robot_description/go2/urdf/go2.urdf`. Moving leg joints come from the Go2-side LowState TF publisher.
 
+### Optional Terminal 2 Alternative: start laptop Isaac Sim viewer
+
+Use this instead of `start_laptop_rviz.sh` when you want a 3D Isaac Sim view of the live mapping data:
+
+```bash
+cd ~/go2-navigation-rviz-project
+./scripts/start_laptop_isaacsim.sh
+```
+
+This starts the same `laptop_rviz_receiver.py` bridge and opens Isaac Sim with `isaac/go2_live_nav_viewer.py`. The Isaac viewer subscribes to `/map`, `/tf`, `/tf_static`, `/odom`, `/scan`, `/trans_cloud`, `/initialpose`, and `/goal_pose`.
+
+The Isaac viewer is for visualization only. It does not replace Nav2, SLAM Toolbox, or RViz goal tools. Keep RViz available when you need the normal **2D Pose Estimate** or **2D Goal Pose** click tools.
+
 ### Terminal 3: start live mapping on the Go2
 
 ```bash
@@ -182,7 +199,7 @@ This launches:
 - Nav2 navigation
 - GO2 RViz TCP bridge
 
-In RViz, use `map` as the fixed frame. Wait until the map, TF, scan, point cloud, odometry, camera, and costmap displays start updating before sending goals.
+In RViz or Isaac Sim, use `map` as the fixed frame. Wait until the map, TF, scan, point cloud, odometry, camera, and costmap displays start updating before sending goals.
 
 ## Running Static Map Navigation
 
@@ -240,6 +257,20 @@ The underlying Go2 toolbox also exposes the raw deskewed lidar point cloud as `/
 The camera and point cloud are high-bandwidth topics. The camera is disabled by default, and the point cloud is relayed through the SSH tunnel with a conservative default limit of 0.5 Hz. Increase these values only if the network remains responsive.
 
 The bridge also limits relayed `/tf` to 20 Hz and the Go2 joint TF publisher to 20 Hz. Higher rates can make the RobotModel look smoother on a strong wired network, but they often cause visible RViz freezing over the Pi/hotspot SSH route.
+
+## Isaac Sim Viewer
+
+The Isaac Sim viewer is a lightweight 3D mirror of the relayed laptop ROS graph:
+
+| Isaac Visual | Topic or Source | Notes |
+| --- | --- | --- |
+| Live map | `/map` | Draws occupied and downsampled free occupancy-grid cells in the Isaac world. |
+| Robot pose marker | `/tf`, `/tf_static`, `/odom` | Follows `map -> base_link` when available, with odometry fallback. |
+| Laser scan | `/scan` | Draws transformed scan points in the `map` frame. |
+| Point cloud | `/trans_cloud` | Draws a capped/downsampled lidar cloud to avoid GPU/network lag. |
+| Pose markers | `/initialpose`, `/goal_pose` | Shows the latest initial pose and goal pose messages if they are published. |
+
+The Isaac viewer does not currently import and animate the full articulated Go2 mesh. That is intentional for performance over the Pi relay; it gives a stable body pose marker, live map, scan, and point cloud without adding the camera-feed lag that RViz was showing.
 
 ## Stopping the Stack
 
