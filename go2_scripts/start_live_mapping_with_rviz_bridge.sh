@@ -41,12 +41,14 @@ done
 : "${GO2_RVIZ_RECV_HOST:=127.0.0.1}"
 : "${GO2_RVIZ_RECV_PORT:=16001}"
 : "${GO2_RVIZ_GOAL_MODE:=action}"
-: "${GO2_RVIZ_IMAGE_MAX_HZ:=5.0}"
-: "${GO2_RVIZ_POINTCLOUD_MAX_HZ:=2.0}"
+: "${GO2_RVIZ_TF_MAX_HZ:=20.0}"
+: "${GO2_RVIZ_IMAGE_MAX_HZ:=1.0}"
+: "${GO2_RVIZ_POINTCLOUD_MAX_HZ:=0.5}"
 : "${GO2_CAMERA_ENABLE:=true}"
-: "${GO2_CAMERA_FPS:=${GO2_VIDEO_FPS:-10}}"
+: "${GO2_CAMERA_FPS:=${GO2_VIDEO_FPS:-5}}"
 : "${GO2_JOINT_TF_ENABLE:=true}"
 : "${GO2_LOWSTATE_TOPICS:=lowstate,lf/lowstate}"
+: "${GO2_JOINT_TF_HZ:=20.0}"
 : "${GO2_VIDEO_ENABLE:=false}"
 
 ros2 launch go2_navigation go2_live_mapping_stack.launch.py \
@@ -55,12 +57,14 @@ ros2 launch go2_navigation go2_live_mapping_stack.launch.py \
   target_fps:="${GO2_CAMERA_FPS}" \
   enable_joint_tf:="${GO2_JOINT_TF_ENABLE}" \
   lowstate_topics:="${GO2_LOWSTATE_TOPICS}" \
+  joint_tf_publish_hz:="${GO2_JOINT_TF_HZ}" \
   enable_rviz_bridge:=true \
   rviz_bridge_send_host:="${GO2_RVIZ_SEND_HOST}" \
   rviz_bridge_send_port:="${GO2_RVIZ_SEND_PORT}" \
   rviz_bridge_recv_host:="${GO2_RVIZ_RECV_HOST}" \
   rviz_bridge_recv_port:="${GO2_RVIZ_RECV_PORT}" \
   rviz_bridge_goal_mode:="${GO2_RVIZ_GOAL_MODE}" \
+  rviz_bridge_tf_max_hz:="${GO2_RVIZ_TF_MAX_HZ}" \
   rviz_bridge_image_max_hz:="${GO2_RVIZ_IMAGE_MAX_HZ}" \
   rviz_bridge_pointcloud_max_hz:="${GO2_RVIZ_POINTCLOUD_MAX_HZ}" \
   "$@"

@@ -106,12 +106,14 @@ The default RViz display support enables the robot model, camera relay, point cl
 
 ```bash
 GO2_CAMERA_ENABLE=true
-GO2_CAMERA_FPS=10
+GO2_CAMERA_FPS=5
 GO2_JOINT_TF_ENABLE=true
 GO2_LOWSTATE_TOPICS=lowstate,lf/lowstate
+GO2_JOINT_TF_HZ=20.0
 GO2_VIDEO_ENABLE=false
-GO2_RVIZ_IMAGE_MAX_HZ=5.0
-GO2_RVIZ_POINTCLOUD_MAX_HZ=2.0
+GO2_RVIZ_TF_MAX_HZ=20.0
+GO2_RVIZ_IMAGE_MAX_HZ=1.0
+GO2_RVIZ_POINTCLOUD_MAX_HZ=0.5
 ENABLE_GO2_MODEL=true
 ```
 
@@ -235,7 +237,9 @@ The included RViz config enables these main displays:
 
 The underlying Go2 toolbox also exposes the raw deskewed lidar point cloud as `/utlidar/cloud_deskewed`. This repo displays `/trans_cloud` by default because it is the accumulated cloud already used by the navigation stack.
 
-The camera and point cloud are high-bandwidth topics. They are relayed through the SSH tunnel with default limits of 5 Hz for images and 2 Hz for the point cloud. Lower these values in `config/bridge.env` if the hotspot becomes unstable.
+The camera and point cloud are high-bandwidth topics. They are relayed through the SSH tunnel with conservative default limits of 1 Hz for images and 0.5 Hz for the point cloud. Increase these values only if the network remains responsive.
+
+The bridge also limits relayed `/tf` to 20 Hz and the Go2 joint TF publisher to 20 Hz. Higher rates can make the RobotModel look smoother on a strong wired network, but they often cause visible RViz freezing over the Pi/hotspot SSH route.
 
 ## Stopping the Stack
 
@@ -323,7 +327,7 @@ The wrappers keep the stock `go2_core` video path disabled because some Go2 inst
 ```bash
 GO2_VIDEO_ENABLE=false
 GO2_CAMERA_ENABLE=true
-GO2_CAMERA_FPS=10
+GO2_CAMERA_FPS=5
 ```
 
 Verify the Go2 launch terminal shows `go2_camera_image_publisher.py` and then check the bridge status includes `/camera/image_raw`. If the node logs that the GStreamer stream is not available, the Go2 front-camera multicast stream is not reaching the Go2 Linux side. If the hotspot is overloaded, lower the image relay rate:

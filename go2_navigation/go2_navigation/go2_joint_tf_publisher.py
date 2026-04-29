@@ -44,6 +44,7 @@ class Go2JointTfPublisher(Node):
         super().__init__("go2_joint_tf_publisher")
         self.declare_parameter("lowstate_topics", "lowstate,lf/lowstate")
         self.declare_parameter("stale_switch_period", 1.0)
+        self.declare_parameter("publish_hz", 20.0)
 
         topics_value = self.get_parameter("lowstate_topics").value
         self.lowstate_topics = [
@@ -52,8 +53,11 @@ class Go2JointTfPublisher(Node):
             if topic.strip()
         ]
         self.stale_switch_period = float(self.get_parameter("stale_switch_period").value)
+        self.publish_hz = float(self.get_parameter("publish_hz").value)
+        self.min_publish_period = 0.0 if self.publish_hz <= 0.0 else 1.0 / self.publish_hz
         self.active_topic = None
         self.last_message_time = 0.0
+        self.last_publish_time = 0.0
         self.last_status = time.monotonic()
         self.message_count = 0
 
@@ -90,6 +94,10 @@ class Go2JointTfPublisher(Node):
                 self.get_logger().info("Using LowState topic for joint TF: %s" % topic)
 
             self.last_message_time = now
+            if self.min_publish_period > 0.0 and now - self.last_publish_time < self.min_publish_period:
+                return
+
+            self.last_publish_time = now
             self.publish_joint_transforms(msg)
             self.message_count += 1
 

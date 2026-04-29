@@ -99,6 +99,10 @@ def _launch_setup(context, *args, **kwargs):
                 output='screen',
                 parameters=[{
                     'lowstate_topics': LaunchConfiguration('lowstate_topics').perform(context),
+                    'publish_hz': _as_float(
+                        'joint_tf_publish_hz',
+                        LaunchConfiguration('joint_tf_publish_hz').perform(context),
+                    ),
                 }],
             )
         )
@@ -164,6 +168,8 @@ def _launch_setup(context, *args, **kwargs):
                             LaunchConfiguration('rviz_bridge_recv_port').perform(context),
                             '--goal-mode',
                             LaunchConfiguration('rviz_bridge_goal_mode').perform(context),
+                            '--tf-max-hz',
+                            LaunchConfiguration('rviz_bridge_tf_max_hz').perform(context),
                             '--image-max-hz',
                             LaunchConfiguration('rviz_bridge_image_max_hz').perform(context),
                             '--pointcloud-max-hz',
@@ -209,6 +215,7 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument('enable_joint_tf', default_value='true'),
         DeclareLaunchArgument('lowstate_topics', default_value='lowstate,lf/lowstate'),
+        DeclareLaunchArgument('joint_tf_publish_hz', default_value='20.0'),
         DeclareLaunchArgument('slam_delay', default_value='2.0'),
         DeclareLaunchArgument('navigation_delay', default_value='8.0'),
         DeclareLaunchArgument('enable_rviz_bridge', default_value='false'),
@@ -218,6 +225,7 @@ def generate_launch_description():
         DeclareLaunchArgument('rviz_bridge_recv_host', default_value='127.0.0.1'),
         DeclareLaunchArgument('rviz_bridge_recv_port', default_value='16001'),
         DeclareLaunchArgument('rviz_bridge_goal_mode', default_value='action'),
+        DeclareLaunchArgument('rviz_bridge_tf_max_hz', default_value='20.0'),
         DeclareLaunchArgument('rviz_bridge_image_max_hz', default_value='5.0'),
         DeclareLaunchArgument('rviz_bridge_pointcloud_max_hz', default_value='2.0'),
         UnsetEnvironmentVariable(name='ROS_DOMAIN_ID'),

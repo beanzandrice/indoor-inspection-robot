@@ -169,6 +169,8 @@ class Go2RvizTcpBridge(Node):
         return cb
 
     def topic_max_hz(self, topic_name: str) -> float:
+        if topic_name == "/tf":
+            return self.args.tf_max_hz
         if topic_name == "/camera/image_raw":
             return self.args.image_max_hz
         if topic_name == "/trans_cloud":
@@ -337,6 +339,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--connect-timeout", type=float, default=2.0)
     parser.add_argument("--action-wait-timeout", type=float, default=2.0)
     parser.add_argument("--goal-mode", choices=["action", "topic", "both"], default="action")
+    parser.add_argument("--tf-max-hz", type=float, default=20.0)
     parser.add_argument("--image-max-hz", type=float, default=5.0)
     parser.add_argument("--pointcloud-max-hz", type=float, default=2.0)
     args, _ = parser.parse_known_args()
