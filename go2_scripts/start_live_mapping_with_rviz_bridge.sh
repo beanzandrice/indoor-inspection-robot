@@ -43,12 +43,18 @@ done
 : "${GO2_RVIZ_GOAL_MODE:=action}"
 : "${GO2_RVIZ_IMAGE_MAX_HZ:=5.0}"
 : "${GO2_RVIZ_POINTCLOUD_MAX_HZ:=2.0}"
+: "${GO2_CAMERA_ENABLE:=true}"
+: "${GO2_CAMERA_FPS:=${GO2_VIDEO_FPS:-10}}"
+: "${GO2_JOINT_TF_ENABLE:=true}"
+: "${GO2_LOWSTATE_TOPICS:=lowstate,lf/lowstate}"
 : "${GO2_VIDEO_ENABLE:=false}"
-: "${GO2_VIDEO_FPS:=10}"
 
 ros2 launch go2_navigation go2_live_mapping_stack.launch.py \
-  video_enable:="${GO2_VIDEO_ENABLE}" \
-  target_fps:="${GO2_VIDEO_FPS}" \
+  video_enable:=false \
+  enable_go2_camera:="${GO2_CAMERA_ENABLE}" \
+  target_fps:="${GO2_CAMERA_FPS}" \
+  enable_joint_tf:="${GO2_JOINT_TF_ENABLE}" \
+  lowstate_topics:="${GO2_LOWSTATE_TOPICS}" \
   enable_rviz_bridge:=true \
   rviz_bridge_send_host:="${GO2_RVIZ_SEND_HOST}" \
   rviz_bridge_send_port:="${GO2_RVIZ_SEND_PORT}" \

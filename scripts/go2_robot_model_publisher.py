@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Publish a Go2 URDF and neutral TF tree for RViz RobotModel."""
+"""Publish a Go2 URDF and fixed TF tree for RViz RobotModel."""
 
 import argparse
 import math
@@ -107,7 +107,12 @@ class Go2RobotModelPublisher(Node):
             transform.transform.rotation.w = 1.0
             transforms.append(transform)
 
+        skipped_moving_joints = 0
         for joint in self.robot.findall("joint"):
+            if joint.get("type") != "fixed" and not self.args.include_moving_joints:
+                skipped_moving_joints += 1
+                continue
+
             parent = joint.find("parent")
             child = joint.find("child")
             if parent is None or child is None:
@@ -135,6 +140,11 @@ class Go2RobotModelPublisher(Node):
             transform.transform.rotation.w = qw
             transforms.append(transform)
 
+        if skipped_moving_joints:
+            self.get_logger().info(
+                f"Skipped {skipped_moving_joints} moving joints; they should come from GO2 LowState TF"
+            )
+
         return transforms
 
     def publish_all(self) -> None:
@@ -154,6 +164,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--description-topic", default="/robot_description")
     parser.add_argument("--tf-root-frame", default="base_link")
     parser.add_argument("--republish-period", type=float, default=2.0)
+    parser.add_argument(
+        "--include-moving-joints",
+        action="store_true",
+        help="Also publish neutral transforms for revolute joints. Use only if no GO2 joint TF is available.",
+    )
     args, _ = parser.parse_known_args()
     return args
 
@@ -174,4 +189,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

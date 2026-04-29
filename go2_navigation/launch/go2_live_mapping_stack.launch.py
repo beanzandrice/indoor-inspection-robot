@@ -50,7 +50,10 @@ def _launch_setup(context, *args, **kwargs):
                 os.path.join(go2_core_dir, 'launch', 'go2_base.launch.py')
             ),
             launch_arguments={
-                'video_enable': LaunchConfiguration('video_enable').perform(context),
+                # The copied project supplies its own camera node below. Keep the
+                # stock go2_core video path disabled because some installs do not
+                # include go2_core/video_stream_node.py.
+                'video_enable': 'false',
                 'tcp_enable': LaunchConfiguration('tcp_enable').perform(context),
                 'tcp_host': LaunchConfiguration('tcp_host').perform(context),
                 'tcp_port': LaunchConfiguration('tcp_port').perform(context),
@@ -63,6 +66,44 @@ def _launch_setup(context, *args, **kwargs):
                 os.path.join(go2_perception_dir, 'launch', 'go2_pointcloud_process.launch.py')
             )
         ),
+    ]
+
+    if _as_bool(LaunchConfiguration('enable_go2_camera').perform(context)):
+        actions.append(
+            Node(
+                package='go2_navigation',
+                executable='go2_camera_image_publisher.py',
+                name='go2_camera_image_publisher',
+                output='screen',
+                additional_env={
+                    'LD_PRELOAD': LaunchConfiguration('camera_ld_preload').perform(context),
+                },
+                parameters=[{
+                    'image_topic': LaunchConfiguration('image_topic').perform(context),
+                    'camera_frame_id': LaunchConfiguration('camera_frame_id').perform(context),
+                    'target_fps': _as_float(
+                        'target_fps',
+                        LaunchConfiguration('target_fps').perform(context),
+                    ),
+                    'gstreamer_pipeline': LaunchConfiguration('camera_gstreamer_pipeline').perform(context),
+                }],
+            )
+        )
+
+    if _as_bool(LaunchConfiguration('enable_joint_tf').perform(context)):
+        actions.append(
+            Node(
+                package='go2_navigation',
+                executable='go2_joint_tf_publisher.py',
+                name='go2_joint_tf_publisher',
+                output='screen',
+                parameters=[{
+                    'lowstate_topics': LaunchConfiguration('lowstate_topics').perform(context),
+                }],
+            )
+        )
+
+    actions.extend([
         Node(
             package='tf2_ros',
             executable='static_transform_publisher',
@@ -100,7 +141,7 @@ def _launch_setup(context, *args, **kwargs):
                 )
             ],
         ),
-    ]
+    ])
 
     if _as_bool(LaunchConfiguration('enable_rviz_bridge').perform(context)):
         actions.append(
@@ -153,6 +194,21 @@ def generate_launch_description():
         DeclareLaunchArgument('tcp_port', default_value='5432'),
         DeclareLaunchArgument('target_fps', default_value='30'),
         DeclareLaunchArgument('image_topic', default_value='/camera/image_raw'),
+        DeclareLaunchArgument('enable_go2_camera', default_value='false'),
+        DeclareLaunchArgument('camera_frame_id', default_value='go2_front_camera'),
+        DeclareLaunchArgument('camera_ld_preload', default_value='/lib/aarch64-linux-gnu/libgomp.so.1'),
+        DeclareLaunchArgument(
+            'camera_gstreamer_pipeline',
+            default_value=(
+                'udpsrc address=230.1.1.1 port=1720 multicast-iface=eth0 ! '
+                'application/x-rtp, media=video, encoding-name=H264 ! '
+                'rtph264depay ! h264parse ! avdec_h264 ! videoconvert ! '
+                'video/x-raw,width=1280,height=720,format=BGR ! '
+                'appsink name=go2_camera_sink drop=true sync=false max-buffers=1'
+            ),
+        ),
+        DeclareLaunchArgument('enable_joint_tf', default_value='true'),
+        DeclareLaunchArgument('lowstate_topics', default_value='lowstate,lf/lowstate'),
         DeclareLaunchArgument('slam_delay', default_value='2.0'),
         DeclareLaunchArgument('navigation_delay', default_value='8.0'),
         DeclareLaunchArgument('enable_rviz_bridge', default_value='false'),

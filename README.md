@@ -102,15 +102,20 @@ nano config/bridge.env
 
 Set `PI_HOST`, `PI_USER`, `GO2_HOST`, and `GO2_USER` for the current network. Do not put passwords in this file.
 
-The default RViz display support enables the robot model and keeps Go2 video disabled unless the Go2 video publisher is installed:
+The default RViz display support enables the robot model, camera relay, point cloud relay, and Go2 joint TF relay:
 
 ```bash
+GO2_CAMERA_ENABLE=true
+GO2_CAMERA_FPS=10
+GO2_JOINT_TF_ENABLE=true
+GO2_LOWSTATE_TOPICS=lowstate,lf/lowstate
 GO2_VIDEO_ENABLE=false
-GO2_VIDEO_FPS=10
 GO2_RVIZ_IMAGE_MAX_HZ=5.0
 GO2_RVIZ_POINTCLOUD_MAX_HZ=2.0
 ENABLE_GO2_MODEL=true
 ```
+
+Keep `GO2_VIDEO_ENABLE=false`. The copied project uses its own camera publisher because some Go2 installs do not include `go2_core/video_stream_node.py`.
 
 The robot model URDF path used by default is:
 
@@ -155,7 +160,7 @@ cd ~/go2-navigation-rviz-project
 ```
 
 This starts `laptop_rviz_receiver.py` and opens RViz2 with `rviz/go2_navigation.rviz`.
-It also starts `go2_robot_model_publisher.py`, which publishes `/robot_description` and a neutral Go2 TF model from `robot_description/go2/urdf/go2.urdf`.
+It also starts `go2_robot_model_publisher.py`, which publishes `/robot_description` and the fixed Go2 model transforms from `robot_description/go2/urdf/go2.urdf`. Moving leg joints come from the Go2-side LowState TF publisher.
 
 ### Terminal 3: start live mapping on the Go2
 
@@ -168,7 +173,8 @@ This launches:
 
 - `go2_core` base bringup
 - `go2_perception` point cloud processing
-- Go2 video publishing on `/camera/image_raw`
+- project-owned Go2 camera publishing on `/camera/image_raw`
+- Go2 joint TF publishing from Unitree LowState
 - static transform `base_link -> base_footprint`
 - SLAM Toolbox online async mapping
 - Nav2 navigation
@@ -223,9 +229,9 @@ The included RViz config enables these main displays:
 | RobotModel | `/robot_description` | `std_msgs/String` URDF | Published locally by `scripts/go2_robot_model_publisher.py`. |
 | LaserScan | `/scan` | `sensor_msgs/LaserScan` | 2D scan used by Nav2. |
 | PointCloud | `/trans_cloud` | `sensor_msgs/PointCloud2` | Accumulated Go2 lidar point cloud. |
-| Go2Camera | `/camera/image_raw` | `sensor_msgs/Image` | Go2 video stream from `go2_core`. |
+| Go2Camera | `/camera/image_raw` | `sensor_msgs/Image` | Go2 front camera stream published by `go2_camera_image_publisher.py`. |
 | Odometry | `/odom` | `nav_msgs/Odometry` | Disabled by default in RViz but available. |
-| TF | `/tf`, `/tf_static` | `tf2_msgs/TFMessage` | Relayed from the robot plus local model TF. |
+| TF | `/tf`, `/tf_static` | `tf2_msgs/TFMessage` | Relayed from the robot plus local fixed model TF. Leg joint TF comes from Unitree LowState when available. |
 
 The underlying Go2 toolbox also exposes the raw deskewed lidar point cloud as `/utlidar/cloud_deskewed`. This repo displays `/trans_cloud` by default because it is the accumulated cloud already used by the navigation stack.
 
@@ -302,18 +308,25 @@ The default URDF path is:
 robot_description/go2/urdf/go2.urdf
 ```
 
-If that file is missing or you want a different model, set `GO2_URDF` in `config/bridge.env`. The model publisher also creates a neutral TF tree under `base_link`; the robot will not animate individual leg joints unless real joint state publishing is added later.
+If that file is missing or you want a different model, set `GO2_URDF` in `config/bridge.env`. The laptop model publisher sends only fixed model transforms by default so the Go2-side LowState publisher can animate the moving joints.
+
+If the body moves but the legs stay locked, check the Go2 launch terminal for `go2_joint_tf_publisher.py`. It should log a line like `Using LowState topic for joint TF`. If it only logs `No LowState samples received yet`, run this on the Go2 to find the correct topic and put it in `GO2_LOWSTATE_TOPICS`:
+
+```bash
+ros2 topic list | grep lowstate
+```
 
 ### Camera feed does not appear
 
-The wrappers default to video disabled because some Go2 installs do not include `video_stream_node.py` in the `go2_core` package:
+The wrappers keep the stock `go2_core` video path disabled because some Go2 installs do not include `video_stream_node.py` in the `go2_core` package:
 
 ```bash
 GO2_VIDEO_ENABLE=false
-GO2_VIDEO_FPS=10
+GO2_CAMERA_ENABLE=true
+GO2_CAMERA_FPS=10
 ```
 
-Only set `GO2_VIDEO_ENABLE=true` after confirming the Go2 can run the `go2_core` video publisher. Then verify the bridge status includes `/camera/image_raw`. If the hotspot is overloaded, lower the image relay rate:
+Verify the Go2 launch terminal shows `go2_camera_image_publisher.py` and then check the bridge status includes `/camera/image_raw`. If the node logs that the GStreamer stream is not available, the Go2 front-camera multicast stream is not reaching the Go2 Linux side. If the hotspot is overloaded, lower the image relay rate:
 
 ```bash
 GO2_RVIZ_IMAGE_MAX_HZ=2.0
