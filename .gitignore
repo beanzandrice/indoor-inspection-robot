@@ -1,0 +1,21 @@
+# Local connection settings. Copy config/bridge.env.example to config/bridge.env.
+config/bridge.env
+
+# Runtime output
+logs/
+*.log
+
+# ROS/colcon build output
+build/
+install/
+log/
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Editor and OS files
+.vscode/
+.idea/
+.DS_Store
+
