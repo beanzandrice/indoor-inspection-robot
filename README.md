@@ -290,3 +290,8 @@ Confirm `/scan` is publishing and that TF includes the scan source frame, `base_
 - Keep passwords in your password manager or enter them interactively at SSH prompts.
 - The current static map is included under `go2_navigation/maps/`.
 
+## Credits and Third-Party Dependencies
+
+This project was built on top of the ROS 2 and Unitree Go2 ecosystem. The main third-party projects used by this navigation workflow are credited in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+Open source code still has license requirements. This repository does not store full third-party source trees, but any upstream files copied or adapted into this project should retain their original notices and follow their upstream licenses.
