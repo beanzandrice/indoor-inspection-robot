@@ -16,4 +16,4 @@ ssh -t \
   -o StrictHostKeyChecking=accept-new \
   -J "${PI_USER}@${PI_HOST}" \
   "${GO2_USER}@${GO2_HOST}" \
-  "GO2_RVIZ_SEND_HOST='${GO2_SEND_HOST}' GO2_RVIZ_SEND_PORT='${GO2_SEND_PORT}' GO2_RVIZ_RECV_HOST='${GO2_RECV_HOST}' GO2_RVIZ_RECV_PORT='${GO2_RECV_PORT}' /home/unitree/go2_navigation_project/scripts/start_live_mapping_with_rviz_bridge.sh"
+  "GO2_RVIZ_SEND_HOST='${GO2_SEND_HOST}' GO2_RVIZ_SEND_PORT='${GO2_SEND_PORT}' GO2_RVIZ_RECV_HOST='${GO2_RECV_HOST}' GO2_RVIZ_RECV_PORT='${GO2_RECV_PORT}' GO2_RVIZ_IMAGE_MAX_HZ='${GO2_RVIZ_IMAGE_MAX_HZ:-5.0}' GO2_RVIZ_POINTCLOUD_MAX_HZ='${GO2_RVIZ_POINTCLOUD_MAX_HZ:-2.0}' GO2_VIDEO_ENABLE='${GO2_VIDEO_ENABLE:-true}' GO2_VIDEO_FPS='${GO2_VIDEO_FPS:-10}' /home/unitree/go2_navigation_project/scripts/start_live_mapping_with_rviz_bridge.sh"

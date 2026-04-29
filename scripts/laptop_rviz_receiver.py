@@ -15,7 +15,7 @@ from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 from rclpy.serialization import deserialize_message, serialize_message
-from sensor_msgs.msg import LaserScan
+from sensor_msgs.msg import Image, LaserScan, PointCloud2
 from tf2_msgs.msg import TFMessage
 
 
@@ -26,6 +26,8 @@ TOPIC_TYPES = {
     "/amcl_pose": PoseWithCovarianceStamped,
     "/odom": Odometry,
     "/scan": LaserScan,
+    "/trans_cloud": PointCloud2,
+    "/camera/image_raw": Image,
     "/plan": Path,
     "/local_plan": Path,
     "/global_costmap/costmap": OccupancyGrid,

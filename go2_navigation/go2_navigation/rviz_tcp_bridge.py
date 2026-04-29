@@ -17,7 +17,7 @@ from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 from rclpy.serialization import deserialize_message, serialize_message
-from sensor_msgs.msg import LaserScan
+from sensor_msgs.msg import Image, LaserScan, PointCloud2
 from tf2_msgs.msg import TFMessage
 
 
@@ -28,6 +28,8 @@ TOPIC_TYPES = {
     "/amcl_pose": PoseWithCovarianceStamped,
     "/odom": Odometry,
     "/scan": LaserScan,
+    "/trans_cloud": PointCloud2,
+    "/camera/image_raw": Image,
     "/plan": Path,
     "/local_plan": Path,
     "/global_costmap/costmap": OccupancyGrid,
@@ -49,7 +51,9 @@ def subscription_qos(topic_name: str) -> QoSProfile:
     return QoSProfile(
         history=HistoryPolicy.KEEP_LAST,
         depth=100 if topic_name == "/tf" else 20,
-        reliability=ReliabilityPolicy.BEST_EFFORT if topic_name in {"/tf", "/scan"} else ReliabilityPolicy.RELIABLE,
+        reliability=ReliabilityPolicy.BEST_EFFORT
+        if topic_name in {"/tf", "/scan", "/trans_cloud", "/camera/image_raw"}
+        else ReliabilityPolicy.RELIABLE,
         durability=DurabilityPolicy.VOLATILE,
     )
 
@@ -72,6 +76,7 @@ class Go2RvizTcpBridge(Node):
         self.recv_buffer = b""
         self.cached_messages = {}
         self.topic_counts = {topic_name: 0 for topic_name in TOPIC_TYPES}
+        self.last_sent_by_topic = {topic_name: 0.0 for topic_name in TOPIC_TYPES}
         self.last_status = time.monotonic()
         self.last_connect_warn = 0.0
 
@@ -157,11 +162,31 @@ class Go2RvizTcpBridge(Node):
         def cb(msg) -> None:
             if topic_name in LATCHED_TOPICS:
                 self.cached_messages[topic_name] = msg
-            if self.send_sock is not None:
+            if self.send_sock is not None and self.should_send_topic(topic_name):
                 self.send_ros_message(topic_name, msg)
                 self.topic_counts[topic_name] += 1
 
         return cb
+
+    def topic_max_hz(self, topic_name: str) -> float:
+        if topic_name == "/camera/image_raw":
+            return self.args.image_max_hz
+        if topic_name == "/trans_cloud":
+            return self.args.pointcloud_max_hz
+        return 0.0
+
+    def should_send_topic(self, topic_name: str) -> bool:
+        max_hz = self.topic_max_hz(topic_name)
+        if max_hz <= 0.0:
+            return True
+
+        now = time.monotonic()
+        min_period = 1.0 / max_hz
+        if now - self.last_sent_by_topic[topic_name] < min_period:
+            return False
+
+        self.last_sent_by_topic[topic_name] = now
+        return True
 
     def close_send_socket(self) -> None:
         if self.send_sock is not None:
@@ -312,6 +337,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--connect-timeout", type=float, default=2.0)
     parser.add_argument("--action-wait-timeout", type=float, default=2.0)
     parser.add_argument("--goal-mode", choices=["action", "topic", "both"], default="action")
+    parser.add_argument("--image-max-hz", type=float, default=5.0)
+    parser.add_argument("--pointcloud-max-hz", type=float, default=2.0)
     args, _ = parser.parse_known_args()
     return args
 

@@ -40,8 +40,12 @@ scripts/
   start_go2_live_mapping_over_ssh.sh
                                    Starts live mapping navigation on the GO2
   laptop_rviz_receiver.py         Laptop-side bridge receiver and command forwarder
+  go2_robot_model_publisher.py    Laptop-side Go2 URDF and neutral TF publisher
 rviz/
   go2_navigation.rviz             RViz display configuration
+robot_description/
+  go2/urdf/go2.urdf               Go2 robot model used by RViz
+  go2/dae/*.dae                   Go2 model meshes
 go2_navigation/
   launch/                         One-command ROS launch files for GO2 navigation
   config/                         Nav2 and SLAM Toolbox parameters
@@ -98,6 +102,24 @@ nano config/bridge.env
 
 Set `PI_HOST`, `PI_USER`, `GO2_HOST`, and `GO2_USER` for the current network. Do not put passwords in this file.
 
+The default RViz display support also enables the Go2 camera and robot model:
+
+```bash
+GO2_VIDEO_ENABLE=true
+GO2_VIDEO_FPS=10
+GO2_RVIZ_IMAGE_MAX_HZ=5.0
+GO2_RVIZ_POINTCLOUD_MAX_HZ=2.0
+ENABLE_GO2_MODEL=true
+```
+
+The robot model URDF path used by default is:
+
+```bash
+robot_description/go2/urdf/go2.urdf
+```
+
+If you want to use a different local Go2 URDF, set `GO2_URDF=/absolute/path/to/go2.urdf` in `config/bridge.env`.
+
 Install the GO2-side code from the laptop:
 
 ```bash
@@ -133,6 +155,7 @@ cd ~/go2-navigation-rviz-project
 ```
 
 This starts `laptop_rviz_receiver.py` and opens RViz2 with `rviz/go2_navigation.rviz`.
+It also starts `go2_robot_model_publisher.py`, which publishes `/robot_description` and a neutral Go2 TF model from `robot_description/go2/urdf/go2.urdf`.
 
 ### Terminal 3: start live mapping on the Go2
 
@@ -145,12 +168,13 @@ This launches:
 
 - `go2_core` base bringup
 - `go2_perception` point cloud processing
+- Go2 video publishing on `/camera/image_raw`
 - static transform `base_link -> base_footprint`
 - SLAM Toolbox online async mapping
 - Nav2 navigation
 - GO2 RViz TCP bridge
 
-In RViz, use `map` as the fixed frame. Wait until the map, TF, scan, odometry, and costmap displays start updating before sending goals.
+In RViz, use `map` as the fixed frame. Wait until the map, TF, scan, point cloud, odometry, camera, and costmap displays start updating before sending goals.
 
 ## Running Static Map Navigation
 
@@ -183,11 +207,29 @@ The static launch file publishes the saved initial pose and performs the map ser
 
 1. Confirm RViz fixed frame is `map`.
 2. Confirm TF contains `map`, `odom`, `base_link`, and `base_footprint`.
-3. Confirm `/scan`, `/odom`, and costmap displays are updating.
+3. Confirm `/scan`, `/trans_cloud`, `/camera/image_raw`, `/odom`, and costmap displays are updating.
 4. Use the RViz **2D Goal Pose** tool to send a Nav2 goal.
 5. Watch the local costmap and robot footprint before allowing the robot to move near obstacles.
 
 Only run one navigation mode at a time. Do not run live mapping and static map localization together.
+
+## RViz Displays
+
+The included RViz config enables these main displays:
+
+| Display | Topic or Source | Message Type | Notes |
+| --- | --- | --- | --- |
+| Map | `/map` | `nav_msgs/OccupancyGrid` | Static map or live SLAM map. |
+| RobotModel | `/robot_description` | `std_msgs/String` URDF | Published locally by `scripts/go2_robot_model_publisher.py`. |
+| LaserScan | `/scan` | `sensor_msgs/LaserScan` | 2D scan used by Nav2. |
+| PointCloud | `/trans_cloud` | `sensor_msgs/PointCloud2` | Accumulated Go2 lidar point cloud. |
+| Go2Camera | `/camera/image_raw` | `sensor_msgs/Image` | Go2 video stream from `go2_core`. |
+| Odometry | `/odom` | `nav_msgs/Odometry` | Disabled by default in RViz but available. |
+| TF | `/tf`, `/tf_static` | `tf2_msgs/TFMessage` | Relayed from the robot plus local model TF. |
+
+The underlying Go2 toolbox also exposes the raw deskewed lidar point cloud as `/utlidar/cloud_deskewed`. This repo displays `/trans_cloud` by default because it is the accumulated cloud already used by the navigation stack.
+
+The camera and point cloud are high-bandwidth topics. They are relayed through the SSH tunnel with default limits of 5 Hz for images and 2 Hz for the point cloud. Lower these values in `config/bridge.env` if the hotspot becomes unstable.
 
 ## Stopping the Stack
 
@@ -244,6 +286,46 @@ data=connected, commands=waiting, relayed: /tf=...
 ```
 
 For static map navigation, AMCL cannot publish `map -> odom` until an initial pose is accepted. The static launch publishes the saved initial pose automatically after startup, but if the robot is not physically near that pose, publish a new initial pose from RViz or adjust the launch arguments.
+
+### Robot model does not appear
+
+Check the laptop terminal for:
+
+```text
+Go2 robot model PID: ...
+Go2 URDF: ...
+```
+
+The default URDF path is:
+
+```bash
+robot_description/go2/urdf/go2.urdf
+```
+
+If that file is missing or you want a different model, set `GO2_URDF` in `config/bridge.env`. The model publisher also creates a neutral TF tree under `base_link`; the robot will not animate individual leg joints unless real joint state publishing is added later.
+
+### Camera feed does not appear
+
+Confirm the GO2 terminal shows that video is enabled. The wrappers default to:
+
+```bash
+GO2_VIDEO_ENABLE=true
+GO2_VIDEO_FPS=10
+```
+
+Then verify the bridge status includes `/camera/image_raw`. If the hotspot is overloaded, lower the image relay rate:
+
+```bash
+GO2_RVIZ_IMAGE_MAX_HZ=2.0
+```
+
+### Point cloud does not appear
+
+The RViz display uses `/trans_cloud`. Confirm the GO2 terminal shows `cloud_accumulation` and `pointcloud_to_laserscan_node` running, and check bridge status for `/trans_cloud`. If the point cloud causes lag, lower:
+
+```bash
+GO2_RVIZ_POINTCLOUD_MAX_HZ=1.0
+```
 
 ### RViz data appears but goals do not move the robot
 

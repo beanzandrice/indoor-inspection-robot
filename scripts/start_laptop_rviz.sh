@@ -25,6 +25,23 @@ set -u
 LOG_DIR="${ROOT_DIR}/logs"
 mkdir -p "${LOG_DIR}"
 RECEIVER_LOG="${LOG_DIR}/laptop_rviz_receiver.log"
+MODEL_LOG="${LOG_DIR}/go2_robot_model_publisher.log"
+GO2_URDF="${GO2_URDF:-${ROOT_DIR}/robot_description/go2/urdf/go2.urdf}"
+ENABLE_GO2_MODEL="${ENABLE_GO2_MODEL:-true}"
+
+MODEL_PID=""
+if [[ "${ENABLE_GO2_MODEL}" == "true" ]]; then
+  if [[ ! -f "${GO2_URDF}" ]]; then
+    echo "Go2 URDF not found: ${GO2_URDF}"
+    echo "Set GO2_URDF to a valid file or set ENABLE_GO2_MODEL=false."
+    exit 1
+  fi
+
+  python3 "${ROOT_DIR}/scripts/go2_robot_model_publisher.py" \
+    --urdf "${GO2_URDF}" \
+    > "${MODEL_LOG}" 2>&1 &
+  MODEL_PID=$!
+fi
 
 python3 "${ROOT_DIR}/scripts/laptop_rviz_receiver.py" \
   --listen-host "${LAPTOP_RECV_HOST}" \
@@ -34,17 +51,30 @@ python3 "${ROOT_DIR}/scripts/laptop_rviz_receiver.py" \
   > "${RECEIVER_LOG}" 2>&1 &
 RECEIVER_PID=$!
 
+cleanup() {
+  kill "${RECEIVER_PID}" >/dev/null 2>&1 || true
+  if [[ -n "${MODEL_PID}" ]]; then
+    kill "${MODEL_PID}" >/dev/null 2>&1 || true
+  fi
+}
+trap cleanup EXIT
+
 sleep 1
+if [[ -n "${MODEL_PID}" ]] && ! kill -0 "${MODEL_PID}" >/dev/null 2>&1; then
+  echo "Go2 robot model publisher exited during startup. Check ${MODEL_LOG}"
+  exit 1
+fi
+
 if ! kill -0 "${RECEIVER_PID}" >/dev/null 2>&1; then
   echo "Laptop receiver exited during startup. Check ${RECEIVER_LOG}"
   exit 1
 fi
 
-cleanup() {
-  kill "${RECEIVER_PID}" >/dev/null 2>&1 || true
-}
-trap cleanup EXIT
-
+if [[ -n "${MODEL_PID}" ]]; then
+  echo "Go2 robot model PID: ${MODEL_PID}"
+  echo "Go2 URDF: ${GO2_URDF}"
+  echo "Robot model log: ${MODEL_LOG}"
+fi
 echo "Laptop receiver PID: ${RECEIVER_PID}"
 echo "Receiver log: ${RECEIVER_LOG}"
 "${RVIZ_BIN:-rviz2}" -d "${ROOT_DIR}/rviz/go2_navigation.rviz"
