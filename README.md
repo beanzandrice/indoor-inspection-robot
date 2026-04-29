@@ -105,19 +105,19 @@ Set `PI_HOST`, `PI_USER`, `GO2_HOST`, and `GO2_USER` for the current network. Do
 The default RViz display support enables the robot model, camera relay, point cloud relay, and Go2 joint TF relay:
 
 ```bash
-GO2_CAMERA_ENABLE=true
+GO2_CAMERA_ENABLE=false
 GO2_CAMERA_FPS=5
 GO2_JOINT_TF_ENABLE=true
 GO2_LOWSTATE_TOPICS=lowstate,lf/lowstate
 GO2_JOINT_TF_HZ=20.0
 GO2_VIDEO_ENABLE=false
 GO2_RVIZ_TF_MAX_HZ=20.0
-GO2_RVIZ_IMAGE_MAX_HZ=1.0
+GO2_RVIZ_IMAGE_MAX_HZ=0.0
 GO2_RVIZ_POINTCLOUD_MAX_HZ=0.5
 ENABLE_GO2_MODEL=true
 ```
 
-Keep `GO2_VIDEO_ENABLE=false`. The copied project uses its own camera publisher because some Go2 installs do not include `go2_core/video_stream_node.py`.
+Keep `GO2_VIDEO_ENABLE=false`. The live camera is also disabled by default because it can saturate the Pi/hotspot SSH bridge. Set `GO2_CAMERA_ENABLE=true` only when you specifically need to inspect the camera feed.
 
 The robot model URDF path used by default is:
 
@@ -175,7 +175,7 @@ This launches:
 
 - `go2_core` base bringup
 - `go2_perception` point cloud processing
-- project-owned Go2 camera publishing on `/camera/image_raw`
+- project-owned Go2 camera publishing on `/camera/image_raw` only if `GO2_CAMERA_ENABLE=true`
 - Go2 joint TF publishing from Unitree LowState
 - static transform `base_link -> base_footprint`
 - SLAM Toolbox online async mapping
@@ -215,7 +215,7 @@ The static launch file publishes the saved initial pose and performs the map ser
 
 1. Confirm RViz fixed frame is `map`.
 2. Confirm TF contains `map`, `odom`, `base_link`, and `base_footprint`.
-3. Confirm `/scan`, `/trans_cloud`, `/camera/image_raw`, `/odom`, and costmap displays are updating.
+3. Confirm `/scan`, `/trans_cloud`, `/odom`, and costmap displays are updating.
 4. Use the RViz **2D Goal Pose** tool to send a Nav2 goal.
 5. Watch the local costmap and robot footprint before allowing the robot to move near obstacles.
 
@@ -231,13 +231,13 @@ The included RViz config enables these main displays:
 | RobotModel | `/robot_description` | `std_msgs/String` URDF | Published locally by `scripts/go2_robot_model_publisher.py`. |
 | LaserScan | `/scan` | `sensor_msgs/LaserScan` | 2D scan used by Nav2. |
 | PointCloud | `/trans_cloud` | `sensor_msgs/PointCloud2` | Accumulated Go2 lidar point cloud. |
-| Go2Camera | `/camera/image_raw` | `sensor_msgs/Image` | Go2 front camera stream published by `go2_camera_image_publisher.py`. |
+| Go2Camera | `/camera/image_raw` | `sensor_msgs/Image` | Disabled by default because the live feed can lag the Pi/hotspot bridge. |
 | Odometry | `/odom` | `nav_msgs/Odometry` | Disabled by default in RViz but available. |
 | TF | `/tf`, `/tf_static` | `tf2_msgs/TFMessage` | Relayed from the robot plus local fixed model TF. Leg joint TF comes from Unitree LowState when available. |
 
 The underlying Go2 toolbox also exposes the raw deskewed lidar point cloud as `/utlidar/cloud_deskewed`. This repo displays `/trans_cloud` by default because it is the accumulated cloud already used by the navigation stack.
 
-The camera and point cloud are high-bandwidth topics. They are relayed through the SSH tunnel with conservative default limits of 1 Hz for images and 0.5 Hz for the point cloud. Increase these values only if the network remains responsive.
+The camera and point cloud are high-bandwidth topics. The camera is disabled by default, and the point cloud is relayed through the SSH tunnel with a conservative default limit of 0.5 Hz. Increase these values only if the network remains responsive.
 
 The bridge also limits relayed `/tf` to 20 Hz and the Go2 joint TF publisher to 20 Hz. Higher rates can make the RobotModel look smoother on a strong wired network, but they often cause visible RViz freezing over the Pi/hotspot SSH route.
 
@@ -326,11 +326,11 @@ The wrappers keep the stock `go2_core` video path disabled because some Go2 inst
 
 ```bash
 GO2_VIDEO_ENABLE=false
-GO2_CAMERA_ENABLE=true
+GO2_CAMERA_ENABLE=false
 GO2_CAMERA_FPS=5
 ```
 
-Verify the Go2 launch terminal shows `go2_camera_image_publisher.py` and then check the bridge status includes `/camera/image_raw`. If the node logs that the GStreamer stream is not available, the Go2 front-camera multicast stream is not reaching the Go2 Linux side. If the hotspot is overloaded, lower the image relay rate:
+To temporarily enable the camera, set `GO2_CAMERA_ENABLE=true` and restart the Go2 launch. Verify the Go2 launch terminal shows `go2_camera_image_publisher.py` and then check the bridge status includes `/camera/image_raw`. If the hotspot is overloaded, disable the camera again or lower the image relay rate:
 
 ```bash
 GO2_RVIZ_IMAGE_MAX_HZ=2.0
