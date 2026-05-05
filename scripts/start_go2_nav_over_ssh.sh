@@ -2,15 +2,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-ENV_FILE="${ROOT_DIR}/config/bridge.env"
-
-if [[ ! -f "${ENV_FILE}" ]]; then
-  echo "Missing ${ENV_FILE}"
-  echo "Copy config/bridge.env.example to config/bridge.env and edit it for your network."
-  exit 1
-fi
-
-source "${ENV_FILE}"
+source "${ROOT_DIR}/scripts/lib/bridge_env.sh"
+bridge_env_load "${ROOT_DIR}"
 
 ssh -t \
   -o StrictHostKeyChecking=accept-new \

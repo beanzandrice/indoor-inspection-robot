@@ -106,6 +106,20 @@ nano config/bridge.env
 
 Set `PI_HOST`, `PI_USER`, `GO2_HOST`, and `GO2_USER` for the current network. Do not put passwords in this file.
 
+`PI_HOST` can be a normal fixed IP, a resolvable hostname, or `auto`. When `PI_HOST_AUTO_REFRESH=true`, the Pi-dependent scripts first use the configured value if it answers on SSH. If that address goes stale, they scan the laptop's local `/24` and reuse the Pi whose SSH host key matches the old saved host key. For pure hostname discovery, set `PI_HOST=auto` and put the Pi's mDNS/DNS names in `PI_MDNS_HOSTS`, for example:
+
+```bash
+PI_HOST=auto
+PI_MDNS_HOSTS="raspberrypi.local pi.local raspi.local"
+```
+
+If mDNS is not available but this laptop has connected to the Pi before, use a previous Pi address as the key identity:
+
+```bash
+PI_HOST=auto
+PI_KNOWN_HOSTS=10.133.241.86
+```
+
 The default RViz display support enables the robot model, camera relay, point cloud relay, and Go2 joint TF relay:
 
 ```bash
@@ -300,7 +314,7 @@ ssh ${PI_USER}@${PI_HOST}
 ssh -J ${PI_USER}@${PI_HOST} ${GO2_USER}@${GO2_HOST}
 ```
 
-If the Pi IP changed, update `PI_HOST` in `config/bridge.env`.
+If the Pi IP changed, keep `PI_HOST_AUTO_REFRESH=true` and run the script again. If the laptop has previously SSHed to the Pi, the scripts can rediscover it by matching the saved SSH host key. If discovery fails, set `PI_HOST` to the current IP once or set `PI_HOST=auto` with the Pi's hostname in `PI_MDNS_HOSTS`.
 
 ### `connect_to 127.0.0.1 port 16000: failed`
 
