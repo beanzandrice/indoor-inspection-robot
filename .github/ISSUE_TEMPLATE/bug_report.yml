@@ -1,0 +1,61 @@
+name: Bug report
+description: Report a reproducible navigation or bridge problem using sanitized data.
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Remove passwords, keys, private addresses, Wi-Fi details, real floorplans, and identifiable imagery before submitting logs or screenshots.
+  - type: input
+    id: version
+    attributes:
+      label: Commit or version
+      placeholder: Git commit SHA
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include laptop OS/ROS/Python, Pi image, Go2 firmware/workspace, viewer, and relevant network topology.
+    validations:
+      required: true
+  - type: dropdown
+    id: workflow
+    attributes:
+      label: Workflow
+      options:
+        - Live mapping
+        - Saved-map navigation
+        - RViz bridge
+        - Isaac Sim viewer
+        - Installation or tunnel setup
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction steps
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior and sanitized logs
+    validations:
+      required: true
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy checklist
+      options:
+        - label: I removed secrets, personal data, private network details, and real floorplans from this report.
+          required: true

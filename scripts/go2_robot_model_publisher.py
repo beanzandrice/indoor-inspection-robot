@@ -3,9 +3,12 @@
 
 import argparse
 import math
-import time
-from pathlib import Path
+import os
 import xml.etree.ElementTree as ET
+from pathlib import Path
+from typing import List, Optional, Tuple
+
+os.environ.setdefault("ROS_LOCALHOST_ONLY", "1")
 
 import rclpy
 from geometry_msgs.msg import TransformStamped
@@ -16,7 +19,7 @@ from std_msgs.msg import String
 from tf2_ros import StaticTransformBroadcaster
 
 
-def quaternion_from_rpy(roll: float, pitch: float, yaw: float) -> tuple[float, float, float, float]:
+def quaternion_from_rpy(roll: float, pitch: float, yaw: float) -> Tuple[float, float, float, float]:
     cy = math.cos(yaw * 0.5)
     sy = math.sin(yaw * 0.5)
     cp = math.cos(pitch * 0.5)
@@ -32,7 +35,7 @@ def quaternion_from_rpy(roll: float, pitch: float, yaw: float) -> tuple[float, f
     )
 
 
-def parse_xyz(value: str | None) -> tuple[float, float, float]:
+def parse_xyz(value: Optional[str]) -> Tuple[float, float, float]:
     if not value:
         return 0.0, 0.0, 0.0
     parts = [float(part) for part in value.split()]
@@ -57,7 +60,7 @@ def rewrite_mesh_paths(urdf_path: Path) -> str:
     return ET.tostring(root, encoding="unicode")
 
 
-def root_link_name(robot: ET.Element) -> str | None:
+def root_link_name(robot: ET.Element) -> Optional[str]:
     links = {link.get("name") for link in robot.findall("link") if link.get("name")}
     child_links = {
         child.get("link")
@@ -94,7 +97,7 @@ class Go2RobotModelPublisher(Node):
             f"{len(self.transforms)} static transforms rooted at {args.tf_root_frame}"
         )
 
-    def build_transforms(self) -> list[TransformStamped]:
+    def build_transforms(self) -> List[TransformStamped]:
         stamp = self.get_clock().now().to_msg()
         transforms = []
         root = root_link_name(self.robot)

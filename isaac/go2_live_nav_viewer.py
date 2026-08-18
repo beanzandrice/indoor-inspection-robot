@@ -8,10 +8,14 @@ control; Nav2/SLAM still run on the GO2.
 
 import argparse
 import math
+import os
 import time
-from collections import deque
+from typing import Optional, Tuple
 
 import numpy as np
+from go2_viewer_utils import TransformGraph, pointcloud2_xyz
+
+os.environ.setdefault("ROS_LOCALHOST_ONLY", "1")
 
 
 def parse_args() -> argparse.Namespace:
@@ -50,28 +54,21 @@ from isaacsim.core.utils.extensions import enable_extension  # noqa: E402
 enable_extension("isaacsim.ros2.bridge")
 simulation_app.update()
 
+import rclpy  # noqa: E402
+from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped  # noqa: E402
 from isaacsim.core.api import World  # noqa: E402
 from isaacsim.core.utils.viewports import set_camera_view  # noqa: E402
 from nav_msgs.msg import OccupancyGrid, Odometry  # noqa: E402
 from pxr import Gf, Sdf, UsdGeom, UsdLux  # noqa: E402
-import rclpy  # noqa: E402
-from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped  # noqa: E402
 from rclpy.node import Node  # noqa: E402
-from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy  # noqa: E402
-from sensor_msgs.msg import LaserScan, PointCloud2, PointField  # noqa: E402
+from rclpy.qos import (  # noqa: E402
+    DurabilityPolicy,
+    HistoryPolicy,
+    QoSProfile,
+    ReliabilityPolicy,
+)
+from sensor_msgs.msg import LaserScan, PointCloud2  # noqa: E402
 from tf2_msgs.msg import TFMessage  # noqa: E402
-
-
-POINTFIELD_DTYPES = {
-    PointField.INT8: np.dtype("i1"),
-    PointField.UINT8: np.dtype("u1"),
-    PointField.INT16: np.dtype("i2"),
-    PointField.UINT16: np.dtype("u2"),
-    PointField.INT32: np.dtype("i4"),
-    PointField.UINT32: np.dtype("u4"),
-    PointField.FLOAT32: np.dtype("f4"),
-    PointField.FLOAT64: np.dtype("f8"),
-}
 
 
 def quaternion_to_matrix(x: float, y: float, z: float, w: float) -> np.ndarray:
@@ -89,7 +86,7 @@ def quaternion_to_matrix(x: float, y: float, z: float, w: float) -> np.ndarray:
     )
 
 
-def quaternion_to_rpy(x: float, y: float, z: float, w: float) -> tuple[float, float, float]:
+def quaternion_to_rpy(x: float, y: float, z: float, w: float) -> Tuple[float, float, float]:
     sinr_cosp = 2.0 * (w * x + y * z)
     cosr_cosp = 1.0 - 2.0 * (x * x + y * y)
     roll = math.atan2(sinr_cosp, cosr_cosp)
@@ -103,7 +100,7 @@ def quaternion_to_rpy(x: float, y: float, z: float, w: float) -> tuple[float, fl
     return roll, pitch, yaw
 
 
-def matrix_to_rpy(matrix: np.ndarray) -> tuple[float, float, float]:
+def matrix_to_rpy(matrix: np.ndarray) -> Tuple[float, float, float]:
     sy = math.sqrt(matrix[0, 0] * matrix[0, 0] + matrix[1, 0] * matrix[1, 0])
     if sy > 1e-6:
         roll = math.atan2(matrix[2, 1], matrix[2, 2])
@@ -145,43 +142,6 @@ def transform_points(points: np.ndarray, matrix: np.ndarray) -> np.ndarray:
     return (matrix @ homogeneous.T).T[:, :3]
 
 
-def pointcloud2_xyz(msg: PointCloud2, max_points: int) -> np.ndarray:
-    fields = {field.name: field for field in msg.fields}
-    if not {"x", "y", "z"}.issubset(fields):
-        return np.empty((0, 3), dtype=np.float32)
-
-    names = []
-    formats = []
-    offsets = []
-    byte_order = ">" if msg.is_bigendian else "<"
-    for field in msg.fields:
-        base_dtype = POINTFIELD_DTYPES.get(field.datatype)
-        if base_dtype is None:
-            continue
-        if base_dtype.itemsize > 1:
-            base_dtype = base_dtype.newbyteorder(byte_order)
-        names.append(field.name)
-        formats.append((base_dtype, field.count) if field.count > 1 else base_dtype)
-        offsets.append(field.offset)
-
-    dtype = np.dtype(
-        {
-            "names": names,
-            "formats": formats,
-            "offsets": offsets,
-            "itemsize": msg.point_step,
-        }
-    )
-    cloud = np.frombuffer(msg.data, dtype=dtype, count=msg.width * msg.height)
-    xyz = np.column_stack((cloud["x"], cloud["y"], cloud["z"])).astype(np.float32, copy=False)
-    finite = np.isfinite(xyz).all(axis=1)
-    xyz = xyz[finite]
-    if max_points > 0 and xyz.shape[0] > max_points:
-        stride = int(math.ceil(xyz.shape[0] / max_points))
-        xyz = xyz[::stride]
-    return xyz
-
-
 def laserscan_xyz(msg: LaserScan) -> np.ndarray:
     ranges = np.asarray(msg.ranges, dtype=np.float32)
     angles = msg.angle_min + np.arange(ranges.shape[0], dtype=np.float32) * msg.angle_increment
@@ -195,7 +155,11 @@ def laserscan_xyz(msg: LaserScan) -> np.ndarray:
     return np.column_stack((ranges * np.cos(angles), ranges * np.sin(angles), np.zeros_like(ranges)))
 
 
-def map_points(msg: OccupancyGrid, occupied_threshold: int, max_free_points: int) -> tuple[np.ndarray, np.ndarray]:
+def map_points(
+    msg: OccupancyGrid,
+    occupied_threshold: int,
+    max_free_points: int,
+) -> Tuple[np.ndarray, np.ndarray]:
     if not msg.data or msg.info.width == 0 or msg.info.height == 0:
         return np.empty((0, 3), dtype=np.float32), np.empty((0, 3), dtype=np.float32)
 
@@ -239,13 +203,15 @@ class IsaacGo2NavViewer(Node):
     def __init__(self, args: argparse.Namespace):
         super().__init__("isaac_go2_nav_viewer")
         self.args = args
-        self.transforms: dict[tuple[str, str], np.ndarray] = {}
-        self.latest_odom: Odometry | None = None
-        self.pending_map: OccupancyGrid | None = None
-        self.pending_scan: LaserScan | None = None
-        self.pending_cloud: PointCloud2 | None = None
-        self.latest_goal: PoseStamped | None = None
-        self.latest_initialpose: PoseWithCovarianceStamped | None = None
+        self.transform_graph = TransformGraph()
+        self.latest_odom = None  # type: Optional[Odometry]
+        self.pending_map = None  # type: Optional[OccupancyGrid]
+        self.pending_scan = None  # type: Optional[LaserScan]
+        self.pending_cloud = None  # type: Optional[PointCloud2]
+        self.latest_goal = None  # type: Optional[PoseStamped]
+        self.latest_initialpose = None  # type: Optional[PoseWithCovarianceStamped]
+        self.robot_dirty = True
+        self.pose_markers_dirty = True
         self.last_status = time.monotonic()
         self.counts = {
             "map": 0,
@@ -298,7 +264,7 @@ class IsaacGo2NavViewer(Node):
             f"map={args.map_topic}, scan={args.scan_topic}, cloud={args.pointcloud_topic}"
         )
 
-    def make_points(self, path: str, color: tuple[float, float, float], width: float) -> UsdGeom.Points:
+    def make_points(self, path: str, color: Tuple[float, float, float], width: float) -> UsdGeom.Points:
         points = UsdGeom.Points.Define(self.stage, Sdf.Path(path))
         points.CreatePointsAttr([])
         points.CreateDisplayColorAttr([Gf.Vec3f(*color)])
@@ -327,9 +293,9 @@ class IsaacGo2NavViewer(Node):
     def create_colored_cube(
         self,
         path: str,
-        translate: tuple[float, float, float],
-        scale: tuple[float, float, float],
-        color: tuple[float, float, float],
+        translate: Tuple[float, float, float],
+        scale: Tuple[float, float, float],
+        color: Tuple[float, float, float],
     ) -> None:
         cube = UsdGeom.Cube.Define(self.stage, Sdf.Path(path))
         cube.CreateSizeAttr(1.0)
@@ -360,13 +326,19 @@ class IsaacGo2NavViewer(Node):
             parent = stamped.header.frame_id.strip("/")
             child = stamped.child_frame_id.strip("/")
             if parent and child:
-                self.transforms[(parent, child)] = transform_to_matrix(stamped.transform)
+                self.transform_graph.update(parent, child, transform_to_matrix(stamped.transform))
+                self.robot_dirty = True
                 self.counts["tf"] += 1
 
     def odom_cb(self, msg: Odometry) -> None:
         self.latest_odom = msg
         if msg.header.frame_id and msg.child_frame_id:
-            self.transforms[(msg.header.frame_id.strip("/"), msg.child_frame_id.strip("/"))] = pose_to_matrix(msg.pose.pose)
+            self.transform_graph.update(
+                msg.header.frame_id,
+                msg.child_frame_id,
+                pose_to_matrix(msg.pose.pose),
+            )
+        self.robot_dirty = True
         self.counts["odom"] += 1
 
     def scan_cb(self, msg: LaserScan) -> None:
@@ -379,32 +351,16 @@ class IsaacGo2NavViewer(Node):
 
     def goal_cb(self, msg: PoseStamped) -> None:
         self.latest_goal = msg
+        self.pose_markers_dirty = True
         self.counts["goal"] += 1
 
     def initialpose_cb(self, msg: PoseWithCovarianceStamped) -> None:
         self.latest_initialpose = msg
+        self.pose_markers_dirty = True
         self.counts["initialpose"] += 1
 
-    def lookup_transform(self, source_frame: str, target_frame: str) -> np.ndarray | None:
-        source = source_frame.strip("/")
-        target = target_frame.strip("/")
-        if source == target:
-            return np.eye(4)
-
-        queue = deque([(source, np.eye(4))])
-        visited = {source}
-        while queue:
-            frame, matrix_so_far = queue.popleft()
-            if frame == target:
-                return matrix_so_far
-            for (parent, child), parent_from_child in list(self.transforms.items()):
-                if child == frame and parent not in visited:
-                    visited.add(parent)
-                    queue.append((parent, parent_from_child @ matrix_so_far))
-                if parent == frame and child not in visited:
-                    visited.add(child)
-                    queue.append((child, np.linalg.inv(parent_from_child) @ matrix_so_far))
-        return None
+    def lookup_transform(self, source_frame: str, target_frame: str) -> Optional[np.ndarray]:
+        return self.transform_graph.lookup(source_frame, target_frame)
 
     def update_scene(self) -> None:
         self.update_map()
@@ -427,10 +383,19 @@ class IsaacGo2NavViewer(Node):
         self.pending_map = None
 
     def update_robot(self) -> None:
+        if not self.robot_dirty:
+            return
         fixed_from_robot = self.lookup_transform(self.args.robot_frame, self.args.fixed_frame)
         if fixed_from_robot is None and self.latest_odom is not None:
-            fixed_from_robot = pose_to_matrix(self.latest_odom.pose.pose)
+            odom_parent = self.latest_odom.header.frame_id.strip("/")
+            odom_child = self.latest_odom.child_frame_id.strip("/")
+            if (
+                odom_parent == self.args.fixed_frame.strip("/")
+                and odom_child == self.args.robot_frame.strip("/")
+            ):
+                fixed_from_robot = pose_to_matrix(self.latest_odom.pose.pose)
         if fixed_from_robot is None:
+            self.robot_dirty = False
             return
 
         translation = fixed_from_robot[:3, 3]
@@ -440,6 +405,7 @@ class IsaacGo2NavViewer(Node):
             (math.degrees(roll), math.degrees(pitch), math.degrees(yaw)),
             UsdGeom.XformCommonAPI.RotationOrderXYZ,
         )
+        self.robot_dirty = False
 
     def update_scan(self) -> None:
         if self.pending_scan is None:
@@ -464,6 +430,8 @@ class IsaacGo2NavViewer(Node):
         self.pending_cloud = None
 
     def update_pose_markers(self) -> None:
+        if not self.pose_markers_dirty:
+            return
         goal_points = []
         if self.latest_goal is not None:
             goal_points.append(
@@ -479,6 +447,7 @@ class IsaacGo2NavViewer(Node):
             initial_points.append([pose.position.x, pose.position.y, max(pose.position.z, 0.18)])
         self.set_points(self.goal_points, np.asarray(goal_points, dtype=np.float32))
         self.set_points(self.initial_points, np.asarray(initial_points, dtype=np.float32))
+        self.pose_markers_dirty = False
 
     def log_status(self) -> None:
         now = time.monotonic()
