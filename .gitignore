@@ -1,21 +1,45 @@
 # Local connection settings. Copy config/bridge.env.example to config/bridge.env.
 config/bridge.env
+.env
+.env.*
+!.env.example
+!*.env.example
 
-# Runtime output
+# Runtime and ROS bag output
 logs/
 *.log
+*.bag
+*.db3
+*.mcap
+rosbag2_*/
 
 # ROS/colcon build output
 build/
 install/
 log/
+.colcon/
 
-# Python cache
+# Python environments, caches, and coverage
 __pycache__/
 *.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
 
-# Editor and OS files
+# Editor, temporary, and OS files
 .vscode/
 .idea/
+.settings/
+.project
+*.swp
+*.swo
+*.tmp
+*~
 .DS_Store
+Thumbs.db
 

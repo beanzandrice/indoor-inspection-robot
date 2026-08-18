@@ -113,14 +113,13 @@ controller_server:
       debug_trajectory_details: True
       min_vel_x: 0.0
       min_vel_y: 0.0
-      max_vel_x: 3.0 #changed
+      # Motion limits tuned for the tested Go2 indoor navigation setup.
+      max_vel_x: 3.0
       max_vel_y: 0.0
       max_vel_theta: 0.8 # tuned to reduce turn-induced AMCL slip
       min_speed_xy: 0.0
-      max_speed_xy: 3.0 #changed
+      max_speed_xy: 3.0
       min_speed_theta: 0.0
-      # Add high threshold velocity for turtlebot 3 issue.
-      # https://github.com/ROBOTIS-GIT/turtlebot3_simulations/issues/75
       acc_lim_x: 10.0
       acc_lim_y: 0.0
       acc_lim_theta: 2.0
