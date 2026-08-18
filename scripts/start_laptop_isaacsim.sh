@@ -37,7 +37,7 @@ fi
 set -u
 
 export ROS_DOMAIN_ID="${LAPTOP_ROS_DOMAIN_ID:-${ROS_DOMAIN_ID:-25}}"
-export ROS_LOCALHOST_ONLY="${ROS_LOCALHOST_ONLY:-0}"
+export ROS_LOCALHOST_ONLY="${LAPTOP_ROS_LOCALHOST_ONLY:-1}"
 
 LOG_DIR="${ROOT_DIR}/logs"
 mkdir -p "${LOG_DIR}"
@@ -59,6 +59,11 @@ else
     --recv-port "${LAPTOP_RECV_PORT}" \
     --robot-host "${LAPTOP_RETURN_HOST}" \
     --send-port "${LAPTOP_RETURN_PORT}" \
+    --protocol "${GO2_RVIZ_PROTOCOL:-binary}" \
+    --max-frame-bytes "${GO2_RVIZ_MAX_FRAME_BYTES:-16777216}" \
+    --max-buffer-bytes "${GO2_RVIZ_MAX_BUFFER_BYTES:-20971520}" \
+    --write-timeout "${GO2_RVIZ_WRITE_TIMEOUT:-2.0}" \
+    --command-max-age "${GO2_COMMAND_MAX_AGE:-5.0}" \
     > "${RECEIVER_LOG}" 2>&1 &
   RECEIVER_PID=$!
   RECEIVER_OWNED=true

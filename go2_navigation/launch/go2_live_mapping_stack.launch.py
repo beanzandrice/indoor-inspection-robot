@@ -1,4 +1,6 @@
+import math
 import os
+import time
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
@@ -6,10 +8,12 @@ from launch.actions import (
     DeclareLaunchArgument,
     IncludeLaunchDescription,
     OpaqueFunction,
+    RegisterEventHandler,
     SetEnvironmentVariable,
     TimerAction,
     UnsetEnvironmentVariable,
 )
+from launch.event_handlers import OnProcessExit
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
@@ -21,9 +25,54 @@ def _as_bool(value):
 
 def _as_float(name, value):
     try:
-        return float(value)
+        parsed = float(value)
     except ValueError as exc:
         raise RuntimeError(f"Launch argument '{name}' must be a number, got '{value}'") from exc
+    if not math.isfinite(parsed) or parsed < 0.0:
+        raise RuntimeError(f"Launch argument '{name}' must be finite and non-negative")
+    return parsed
+
+
+def _readiness_gate(label, timeout, dependent_actions, **condition):
+    """Start actions when a ROS graph condition is ready or its fallback expires."""
+    condition_arguments = []
+    for name, value in condition.items():
+        if value:
+            condition_arguments.extend([f'--{name.replace("_", "-")}', value])
+
+    probe = Node(
+        package='go2_navigation',
+        executable='wait_for_ros.py',
+        name=f'wait_for_{label}',
+        output='screen',
+        arguments=[
+            *condition_arguments,
+            '--timeout',
+            str(timeout),
+            '--label',
+            label,
+        ],
+    )
+
+    started_at = time.monotonic()
+
+    def start_or_preserve_fallback(event, _context):
+        if event.returncode == 0:
+            return list(dependent_actions)
+        remaining = max(timeout - (time.monotonic() - started_at), 0.0)
+        if remaining <= 0.0:
+            return list(dependent_actions)
+        return [TimerAction(period=remaining, actions=list(dependent_actions))]
+
+    return [
+        RegisterEventHandler(
+            OnProcessExit(
+                target_action=probe,
+                on_exit=start_or_preserve_fallback,
+            )
+        ),
+        probe,
+    ]
 
 
 def _launch_setup(context, *args, **kwargs):
@@ -107,76 +156,104 @@ def _launch_setup(context, *args, **kwargs):
             )
         )
 
-    actions.extend([
+    actions.append(
         Node(
             package='tf2_ros',
             executable='static_transform_publisher',
             name='base_link_to_base_footprint',
             output='screen',
             arguments=['0', '0', '0', '0', '0', '0', 'base_link', 'base_footprint'],
+        )
+    )
+
+    slam = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            os.path.join(slam_toolbox_dir, 'launch', 'online_async_launch.py')
         ),
-        TimerAction(
-            period=slam_delay,
-            actions=[
-                IncludeLaunchDescription(
-                    PythonLaunchDescriptionSource(
-                        os.path.join(slam_toolbox_dir, 'launch', 'online_async_launch.py')
-                    ),
-                    launch_arguments={
-                        'use_sim_time': use_sim_time,
-                        'params_file': slam_params_file,
-                    }.items(),
-                )
-            ],
+        launch_arguments={
+            'use_sim_time': use_sim_time,
+            'params_file': slam_params_file,
+        }.items(),
+    )
+    actions.extend(
+        _readiness_gate(
+            'slam_input',
+            slam_delay,
+            [slam],
+            topic='/scan',
+        )
+    )
+
+    navigation = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            os.path.join(nav2_bringup_dir, 'launch', 'navigation_launch.py')
         ),
-        TimerAction(
-            period=navigation_delay,
-            actions=[
-                IncludeLaunchDescription(
-                    PythonLaunchDescriptionSource(
-                        os.path.join(nav2_bringup_dir, 'launch', 'navigation_launch.py')
-                    ),
-                    launch_arguments={
-                        'use_sim_time': use_sim_time,
-                        'autostart': autostart,
-                        'params_file': params_file,
-                        'map_subscribe_transient_local': 'true',
-                    }.items(),
-                )
-            ],
-        ),
-    ])
+        launch_arguments={
+            'use_sim_time': use_sim_time,
+            'autostart': autostart,
+            'params_file': params_file,
+            'map_subscribe_transient_local': 'true',
+        }.items(),
+    )
+    actions.extend(
+        _readiness_gate(
+            'navigation_map',
+            navigation_delay,
+            [navigation],
+            topic='/map',
+        )
+    )
 
     if _as_bool(LaunchConfiguration('enable_rviz_bridge').perform(context)):
-        actions.append(
-            TimerAction(
-                period=rviz_bridge_delay,
-                actions=[
-                    Node(
-                        package='go2_navigation',
-                        executable='rviz_tcp_bridge.py',
-                        name='go2_rviz_tcp_bridge',
-                        output='screen',
-                        arguments=[
-                            '--send-host',
-                            LaunchConfiguration('rviz_bridge_send_host').perform(context),
-                            '--send-port',
-                            LaunchConfiguration('rviz_bridge_send_port').perform(context),
-                            '--recv-host',
-                            LaunchConfiguration('rviz_bridge_recv_host').perform(context),
-                            '--recv-port',
-                            LaunchConfiguration('rviz_bridge_recv_port').perform(context),
-                            '--goal-mode',
-                            LaunchConfiguration('rviz_bridge_goal_mode').perform(context),
-                            '--tf-max-hz',
-                            LaunchConfiguration('rviz_bridge_tf_max_hz').perform(context),
-                            '--image-max-hz',
-                            LaunchConfiguration('rviz_bridge_image_max_hz').perform(context),
-                            '--pointcloud-max-hz',
-                            LaunchConfiguration('rviz_bridge_pointcloud_max_hz').perform(context),
-                        ],
-                    )
-                ],
+        bridge_arguments = [
+            '--send-host',
+            LaunchConfiguration('rviz_bridge_send_host').perform(context),
+            '--send-port',
+            LaunchConfiguration('rviz_bridge_send_port').perform(context),
+            '--recv-host',
+            LaunchConfiguration('rviz_bridge_recv_host').perform(context),
+            '--recv-port',
+            LaunchConfiguration('rviz_bridge_recv_port').perform(context),
+            '--goal-mode',
+            LaunchConfiguration('rviz_bridge_goal_mode').perform(context),
+            '--protocol',
+            LaunchConfiguration('rviz_bridge_protocol').perform(context),
+            '--topic-allowlist',
+            LaunchConfiguration('rviz_bridge_topic_allowlist').perform(context),
+            '--queue-capacity',
+            LaunchConfiguration('rviz_bridge_queue_capacity').perform(context),
+            '--max-frame-bytes',
+            LaunchConfiguration('rviz_bridge_max_frame_bytes').perform(context),
+            '--max-buffer-bytes',
+            LaunchConfiguration('rviz_bridge_max_buffer_bytes').perform(context),
+            '--write-timeout',
+            LaunchConfiguration('rviz_bridge_write_timeout').perform(context),
+            '--tf-max-hz',
+            LaunchConfiguration('rviz_bridge_tf_max_hz').perform(context),
+            '--image-max-hz',
+            LaunchConfiguration('rviz_bridge_image_max_hz').perform(context),
+            '--pointcloud-max-hz',
+            LaunchConfiguration('rviz_bridge_pointcloud_max_hz').perform(context),
+        ]
+        topic_rate_limits = LaunchConfiguration('rviz_bridge_topic_rate_limits').perform(context)
+        if topic_rate_limits:
+            bridge_arguments.extend(['--topic-rate-limits', topic_rate_limits])
+        if _as_bool(LaunchConfiguration('rviz_bridge_debug_all_topics').perform(context)):
+            bridge_arguments.append('--debug-all-topics')
+
+        bridge = Node(
+            package='go2_navigation',
+            executable='rviz_tcp_bridge.py',
+            name='go2_rviz_tcp_bridge',
+            output='screen',
+            arguments=bridge_arguments,
+        )
+        actions.extend(
+            _readiness_gate(
+                'rviz_bridge_tf',
+                rviz_bridge_delay,
+                [bridge],
+                topic='/tf',
             )
         )
 
@@ -225,9 +302,17 @@ def generate_launch_description():
         DeclareLaunchArgument('rviz_bridge_recv_host', default_value='127.0.0.1'),
         DeclareLaunchArgument('rviz_bridge_recv_port', default_value='16001'),
         DeclareLaunchArgument('rviz_bridge_goal_mode', default_value='action'),
+        DeclareLaunchArgument('rviz_bridge_protocol', default_value='binary'),
+        DeclareLaunchArgument('rviz_bridge_topic_allowlist', default_value='default'),
+        DeclareLaunchArgument('rviz_bridge_topic_rate_limits', default_value=''),
+        DeclareLaunchArgument('rviz_bridge_debug_all_topics', default_value='false'),
+        DeclareLaunchArgument('rviz_bridge_queue_capacity', default_value='32'),
+        DeclareLaunchArgument('rviz_bridge_max_frame_bytes', default_value='16777216'),
+        DeclareLaunchArgument('rviz_bridge_max_buffer_bytes', default_value='20971520'),
+        DeclareLaunchArgument('rviz_bridge_write_timeout', default_value='2.0'),
         DeclareLaunchArgument('rviz_bridge_tf_max_hz', default_value='20.0'),
-        DeclareLaunchArgument('rviz_bridge_image_max_hz', default_value='5.0'),
-        DeclareLaunchArgument('rviz_bridge_pointcloud_max_hz', default_value='2.0'),
+        DeclareLaunchArgument('rviz_bridge_image_max_hz', default_value='2.0'),
+        DeclareLaunchArgument('rviz_bridge_pointcloud_max_hz', default_value='0.5'),
         UnsetEnvironmentVariable(name='ROS_DOMAIN_ID'),
         SetEnvironmentVariable(name='ROS_LOCALHOST_ONLY', value='0'),
         SetEnvironmentVariable(name='RMW_IMPLEMENTATION', value='rmw_cyclonedds_cpp'),

@@ -1,6 +1,12 @@
-# Indoor Inspection Robot: Unitree Go2 Navigation Bridge
+# Unitree Go2 Navigation Bridge
 
-ROS 2 tooling for running navigation on a Unitree Go2 while monitoring and commanding it from a laptop through a Raspberry Pi relay.
+<p align="center">
+  <img src="docs/assets/social-preview.png" alt="Unitree Go2 Navigation Bridge project overview" width="100%">
+</p>
+
+[![CI](https://github.com/nortiz01/indoor-inspection-robot/actions/workflows/ci.yml/badge.svg)](https://github.com/nortiz01/indoor-inspection-robot/actions/workflows/ci.yml)
+
+ROS 2 tooling for running navigation on a Unitree Go2 while monitoring and commanding it from a laptop through a Raspberry Pi relay. It is the mobility, mapping, and visualization subsystem of an indoor-inspection platform; inspection sensing and defect reporting are outside this repository's current scope.
 
 The project supports two hardware workflows:
 
@@ -12,18 +18,22 @@ RViz2 is the primary operator interface. An optional Isaac Sim viewer mirrors th
 > [!IMPORTANT]
 > This is a hardware-specific robotics project, not a plug-and-play simulator. The scripts assume the ROS workspaces, network interfaces, and remote project paths described below. Verify those assumptions before operating a robot.
 
+## Engineering Highlights
+
+- Runs Nav2 and SLAM close to the robot while exposing a focused operator view on the laptop.
+- Carries selected ROS messages across an SSH-routed network without relying on DDS discovery through the relay.
+- Uses bounded transport and asynchronous sending so high-bandwidth visualization data cannot indefinitely block ROS callbacks.
+- Supports saved-map navigation, live mapping, RViz2, and an optional Isaac Sim visualization path.
+- Includes hardware-independent protocol, configuration, script, and asset validation while keeping robot testing requirements explicit.
+
 ## Architecture
 
-```text
-Laptop (RViz2 or Isaac Sim)
-        |
-        | SSH ProxyJump and local/reverse port forwarding
-        v
-Raspberry Pi 3 relay
-        |
-        | robot-side wired network
-        v
-Unitree Go2 (ROS 2 Foxy, Nav2, SLAM Toolbox)
+The detailed data-flow and trust-boundary diagram is available in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+
+```mermaid
+flowchart LR
+    Laptop[Laptop: RViz2 / Isaac Sim] <-->|Framed ROS data and commands| Pi[Raspberry Pi SSH relay]
+    Pi <--> Go2[Go2: Nav2 / SLAM / sensors]
 ```
 
 Direct ROS 2 discovery can be unreliable across the Pi relay and hotspot route, so this project transports selected serialized ROS messages over two TCP channels inside SSH tunnels:
@@ -142,10 +152,11 @@ The installer:
 
 1. archives `go2_navigation/` and `go2_scripts/` locally;
 2. copies the archive to the Go2 through the Pi;
-3. replaces the deployed copy of the project's `go2_navigation` package; and
-4. runs `colcon build --symlink-install --packages-select go2_navigation` on the Go2.
+3. extracts and builds a uniquely named staging workspace;
+4. validates the package, executables, and launch arguments before activation; and
+5. switches the verified workspace into place with same-filesystem renames while retaining the replaced version at `/home/unitree/go2_navigation_project.previous`.
 
-This deployment step deliberately replaces `/home/unitree/go2_navigation_project/src/go2_navigation`. Keep unrelated packages outside that directory.
+If staging or activation fails, the installer keeps or restores the last working deployment. The project owns `/home/unitree/go2_navigation_project` and its `.previous` rollback directory; keep unrelated packages outside them.
 
 ## Run the Project
 
@@ -213,15 +224,26 @@ The checked-in template documents every setting. The most commonly tuned options
 | Variable | Purpose | Default |
 | --- | --- | --- |
 | `GO2_CAMERA_ENABLE` | Start the project camera publisher | `false` |
+| `LAPTOP_ROS_LOCALHOST_ONLY` | Keep laptop ROS discovery and command topics on loopback | `1` |
 | `GO2_CAMERA_FPS` | Camera capture target | `5` |
 | `GO2_JOINT_TF_ENABLE` | Publish leg TF from Unitree LowState | `true` |
 | `GO2_LOWSTATE_TOPICS` | Comma-separated LowState candidates | `lowstate,lf/lowstate` |
 | `GO2_JOINT_TF_HZ` | Joint TF publish limit | `20.0` |
+| `GO2_RVIZ_PROTOCOL` | Bridge encoding: versioned `binary` or rollout-only `legacy-json` | `binary` |
+| `GO2_RVIZ_TOPIC_ALLOWLIST` | `default`, `all`, or a comma-separated topic set | `default` |
+| `GO2_RVIZ_TOPIC_RATE_LIMITS` | Optional `/topic=hz` overrides | empty |
 | `GO2_RVIZ_TF_MAX_HZ` | Relayed `/tf` rate limit | `20.0` |
-| `GO2_RVIZ_IMAGE_MAX_HZ` | Relayed camera rate limit; `0` means unlimited | `0.0` |
+| `GO2_RVIZ_IMAGE_MAX_HZ` | Relayed camera rate limit; `0` means unlimited | `2.0` |
 | `GO2_RVIZ_POINTCLOUD_MAX_HZ` | Relayed `/trans_cloud` rate limit | `0.5` |
+| `GO2_RVIZ_QUEUE_CAPACITY` | Maximum queued topics/samples before replacement or drop | `32` |
+| `GO2_RVIZ_MAX_FRAME_BYTES` | Maximum accepted framed message size | `16777216` |
+| `GO2_RVIZ_MAX_BUFFER_BYTES` | Maximum incomplete receive-buffer size | `20971520` |
+| `GO2_RVIZ_WRITE_TIMEOUT` | Network write timeout in seconds | `2.0` |
+| `GO2_COMMAND_MAX_AGE` | Maximum time a command may wait in the laptop outbound queue | `5.0` |
 | `ENABLE_GO2_MODEL` | Publish the laptop-side URDF and fixed TF | `true` |
 | `GO2_URDF` | Optional alternate local URDF path | repository URDF |
+
+The default topic profile excludes high-bandwidth global and local costmaps. Set `GO2_RVIZ_TOPIC_ALLOWLIST=all`, enable `GO2_RVIZ_DEBUG_ALL_TOPICS=true`, or provide an explicit topic list only while those streams are needed. The legacy JSON transport exists for coordinated rollout compatibility; use the binary protocol once both endpoints are updated.
 
 The legacy `go2_core` video path remains disabled because some Go2 installations do not include `video_stream_node.py`. This project uses its own camera publisher when `GO2_CAMERA_ENABLE=true`.
 
@@ -237,7 +259,7 @@ The legacy `go2_core` video path remains disabled because some Go2 installations
 | Camera | `/camera/image_raw` | `sensor_msgs/Image` | Disabled by default to protect bridge bandwidth |
 | Odometry | `/odom` | `nav_msgs/Odometry` | Available but disabled by default in RViz |
 | Plans | `/plan`, `/local_plan` | `nav_msgs/Path` | Relayed when published by the stack |
-| Costmaps | global and local costmap topics | `nav_msgs/OccupancyGrid` | Relayed as transient-local data |
+| Costmaps | global and local costmap topics | `nav_msgs/OccupancyGrid` | Opt-in through the `all`/debug or explicit allowlist profile |
 | Operator commands | `/initialpose`, `/goal_pose` | geometry messages | Forwarded from the laptop to the Go2 |
 
 Use `map` as the RViz fixed frame. Before sending a goal, confirm that `map`, `odom`, `base_link`, and `base_footprint` are connected in TF and that `/scan`, `/odom`, and the costmaps are updating.
@@ -249,7 +271,8 @@ Use `map` as the RViz fixed frame. Before sending a goal, confirm that `map`, `o
 - The included map, initial pose, and navigation tuning were captured for a specific indoor environment. Re-map and retune before using them elsewhere.
 - Run either live mapping or saved-map localization, never both at the same time.
 - Camera and point-cloud traffic can saturate a Pi or hotspot connection. Increase relay rates gradually while watching command latency.
-- The custom TCP protocol has no authentication or encryption of its own. Keep its endpoints on loopback as configured and carry it only through the SSH tunnels.
+- The versioned bridge protocol enforces frame and buffer limits but has no authentication or encryption of its own. Keep its endpoints on loopback as configured and carry it only through the SSH tunnels.
+- Laptop ROS discovery defaults to loopback so another DDS participant on the LAN cannot publish navigation commands into this bridge. Set `LAPTOP_ROS_LOCALHOST_ONLY=0` only for a trusted, isolated ROS network or an authenticated SROS2 deployment.
 - Do not expose ports `16000` or `16001` on an untrusted network.
 
 ## Troubleshooting
@@ -333,11 +356,15 @@ Verify that the perception stack publishes a valid frame on `/scan` and `/trans_
 
 ## Development Checks
 
-The repository does not include hardware-independent integration tests. Useful lightweight checks are:
+The automated suite covers protocol framing and fragmentation, bounded queues, rate limiting, transform utilities, point-cloud conversion, configuration assets, and documentation without requiring ROS or robot hardware:
 
 ```bash
-python3 -m compileall scripts go2_navigation isaac
+python3 -m pip install "numpy<2" PyYAML pytest
+python3 -m compileall -q scripts go2_navigation isaac tests tools
+python3 tools/validation/validate_repository.py
+python3 -m pytest -q tests
 find scripts go2_scripts -name '*.sh' -print0 | xargs -0 -n1 bash -n
+find scripts go2_scripts -name '*.sh' -print0 | xargs -0 shellcheck --severity=error
 ```
 
 On a configured ROS 2 system, build the package with:

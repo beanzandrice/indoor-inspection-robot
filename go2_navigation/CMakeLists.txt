@@ -32,9 +32,11 @@ install(
 
 install(
   PROGRAMS
+    go2_navigation/bridge_protocol.py
     go2_navigation/go2_camera_image_publisher.py
     go2_navigation/go2_joint_tf_publisher.py
     go2_navigation/rviz_tcp_bridge.py
+    go2_navigation/wait_for_ros.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
