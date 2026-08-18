@@ -1,441 +1,355 @@
-# Unitree Go2 Navigation and RViz Bridge
+# Indoor Inspection Robot: Unitree Go2 Navigation Bridge
 
-This repository contains the project-owned code used to run the Unitree Go2 navigation stack from a laptop through a Raspberry Pi 3 relay. It supports two robot modes:
+ROS 2 tooling for running navigation on a Unitree Go2 while monitoring and commanding it from a laptop through a Raspberry Pi relay.
 
-- **Live mapping:** runs SLAM Toolbox online mapping, Nav2, Go2 base bringup, point cloud processing, and the RViz bridge.
-- **Static map navigation:** runs Nav2 localization with the saved room map, AMCL, Nav2 navigation, Go2 base bringup, point cloud processing, and the RViz bridge.
+The project supports two hardware workflows:
 
-The repo intentionally does **not** store SSH passwords, campus credentials, runtime logs, or local-only `bridge.env` files.
+- **Live mapping:** runs SLAM Toolbox, Nav2, Go2 base bringup, point-cloud processing, and the laptop visualization bridge.
+- **Saved-map navigation:** runs AMCL localization and Nav2 against the included room map.
 
-## System Architecture
+RViz2 is the primary operator interface. An optional Isaac Sim viewer mirrors the relayed map, pose, scan, and point cloud, but it does not simulate or control the robot.
+
+> [!IMPORTANT]
+> This is a hardware-specific robotics project, not a plug-and-play simulator. The scripts assume the ROS workspaces, network interfaces, and remote project paths described below. Verify those assumptions before operating a robot.
+
+## Architecture
 
 ```text
-Laptop running RViz2
-  |
-  | SSH ProxyJump through hotspot or shared network
-  v
+Laptop (RViz2 or Isaac Sim)
+        |
+        | SSH ProxyJump and local/reverse port forwarding
+        v
 Raspberry Pi 3 relay
-  |
-  | Wired robot-side network
-  v
-Unitree Go2
-  |
-  | ROS 2 Foxy, go2_core, go2_perception, Nav2, SLAM Toolbox
-  v
-Navigation stack and RViz TCP bridge
+        |
+        | robot-side wired network
+        v
+Unitree Go2 (ROS 2 Foxy, Nav2, SLAM Toolbox)
 ```
 
-The TCP bridge exists because direct ROS 2 discovery between the laptop and the robot is unreliable across the Pi relay and hotspot route. The bridge relays the data RViz needs from the robot to the laptop and forwards RViz commands such as 2D goal poses back to the robot.
+Direct ROS 2 discovery can be unreliable across the Pi relay and hotspot route, so this project transports selected serialized ROS messages over two TCP channels inside SSH tunnels:
+
+- port `16000`: Go2 navigation data to the laptop
+- port `16001`: laptop pose and goal commands to the Go2
+
+The Go2-side bridge relays visualization topics and converts RViz goal poses into Nav2 `NavigateToPose` actions. The laptop-side receiver republishes those topics into the local ROS graph.
+
+## What Is Included
+
+- Launch files for live SLAM and static-map Nav2 workflows
+- A two-way ROS-to-TCP bridge designed for SSH forwarding
+- Laptop launch helpers for RViz2 and Isaac Sim
+- A saved occupancy map and tuned Nav2/SLAM parameters
+- A Go2 URDF, meshes, and joint-state TF publisher for visualization
+- Optional front-camera relay with conservative bandwidth defaults
+- Raspberry Pi host discovery using mDNS/DNS or a previously trusted SSH host key
 
 ## Repository Layout
 
-```text
-config/
-  bridge.env.example              Laptop/Pi/Go2 network template
-scripts/
-  install_go2_project.sh          Copies and rebuilds the GO2-side project
-  start_tunnels.sh                Opens SSH tunnels through the Pi to the GO2
-  start_laptop_rviz.sh            Starts laptop receiver and RViz2
-  start_laptop_isaacsim.sh        Starts laptop receiver and Isaac Sim viewer
-  start_go2_nav_over_ssh.sh       Starts static-map navigation on the GO2
-  start_go2_live_mapping_over_ssh.sh
-                                   Starts live mapping navigation on the GO2
-  laptop_rviz_receiver.py         Laptop-side bridge receiver and command forwarder
-  go2_robot_model_publisher.py    Laptop-side Go2 URDF and neutral TF publisher
-isaac/
-  go2_live_nav_viewer.py          Isaac Sim viewer for map, robot pose, scan, and point cloud
-rviz/
-  go2_navigation.rviz             RViz display configuration
-robot_description/
-  go2/urdf/go2.urdf               Go2 robot model used by RViz
-  go2/dae/*.dae                   Go2 model meshes
-go2_navigation/
-  launch/                         One-command ROS launch files for GO2 navigation
-  config/                         Nav2 and SLAM Toolbox parameters
-  maps/                           Static map YAML and PGM
-  go2_navigation/rviz_tcp_bridge.py
-                                   GO2-side ROS-to-TCP bridge
-go2_scripts/
-  start_navigation_with_rviz_bridge.sh
-  start_live_mapping_with_rviz_bridge.sh
-```
+| Path | Purpose |
+| --- | --- |
+| `config/bridge.env.example` | Template for laptop, Pi, Go2, tunnel, and relay settings |
+| `scripts/` | Laptop-side install, tunnel, receiver, and viewer launch helpers |
+| `scripts/lib/bridge_env.sh` | Shared configuration loading and Pi discovery logic |
+| `go2_navigation/` | ROS 2 package containing launch files, parameters, maps, and bridge nodes |
+| `go2_scripts/` | Entry points installed on the Go2 |
+| `rviz/` | RViz2 display configuration |
+| `isaac/` | Optional Isaac Sim visualization client |
+| `robot_description/` | Go2 URDF, meshes, and the assets' upstream license |
+| `third_party/licenses/` | License notices for adapted upstream software |
+| `THIRD_PARTY_NOTICES.md` | Dependency credits and third-party asset provenance |
 
-## Requirements
+## Requirements and Assumptions
 
 ### Laptop
 
-- Ubuntu with ROS 2 installed. The scripts try `/opt/ros/humble/setup.bash` first and then `/opt/ros/foxy/setup.bash`.
-- `rviz2`
-- Optional: Isaac Sim 4.5 extracted at `/home/nortiz01/isaacsim`, or set `ISAACSIM_ROOT` before running the Isaac viewer.
-- Python 3
-- SSH access to the Raspberry Pi 3
-- Network route from the Pi to the Go2
+- Ubuntu or another Linux environment with Bash
+- ROS 2 Humble or Foxy; the laptop scripts prefer Humble when both are installed
+- RViz2 and the ROS message packages imported by `scripts/laptop_rviz_receiver.py`
+- Python 3, OpenSSH (`ssh` and `scp`), `tar`, and standard Unix utilities
+- SSH access to the Pi and a route from the Pi to the Go2
+- Optional: Isaac Sim 4.5 using its bundled ROS 2 Humble bridge layout
 
-### Go2
+### Raspberry Pi relay
 
-- ROS 2 Foxy
-- `unitree_ros2` Cyclone DDS workspace
-- `go2_ros2_ws` or equivalent packages that provide:
-  - `go2_core`
-  - `go2_perception`
-  - `nav2_bringup`
-  - `slam_toolbox`
-  - `tf2_ros`
+- SSH server reachable from the laptop
+- Network access to the Go2, normally over the robot-side wired network
+- No project files need to be installed on the Pi; it acts as the SSH jump host
 
-The GO2 project path used by these scripts is:
+### Unitree Go2
+
+- ROS 2 Foxy at `/opt/ros/foxy/setup.bash`
+- Unitree Cyclone DDS workspace at `~/unitree_ros2/cyclonedds_ws/install/setup.bash`
+- Packages providing `go2_core`, `go2_perception`, `unitree_go`, `nav2_bringup`, `slam_toolbox`, and `tf2_ros`
+- `colcon` for building the installed `go2_navigation` package
+- Optional camera support: Python GObject bindings and GStreamer plugins for RTP/H.264 decoding
+
+The deployment scripts intentionally use `/home/unitree/go2_navigation_project` on the Go2. The launch files also assume the robot network interface is `eth0`. Change the scripts or pass the relevant launch argument if your robot differs.
+
+## Setup
+
+### 1. Clone the repository
 
 ```bash
-/home/unitree/go2_navigation_project
+git clone https://github.com/nortiz01/indoor-inspection-robot.git
+cd indoor-inspection-robot
 ```
 
-## First-Time Setup
-
-Clone this repository on the laptop:
+Git preserves the executable bits on the shell and Python entry points. If you downloaded a source archive instead, restore them with:
 
 ```bash
-git clone <repo-url>
-cd go2-navigation-rviz-project
+chmod +x scripts/*.sh scripts/*.py go2_scripts/*.sh go2_navigation/go2_navigation/*.py isaac/*.py
 ```
 
-Create the local network config:
+### 2. Create a local network configuration
 
 ```bash
 cp config/bridge.env.example config/bridge.env
-nano config/bridge.env
+${EDITOR:-nano} config/bridge.env
 ```
 
-Set `PI_HOST`, `PI_USER`, `GO2_HOST`, and `GO2_USER` for the current network. Do not put passwords in this file.
+At minimum, review these values:
 
-`PI_HOST` can be a normal fixed IP, a resolvable hostname, or `auto`. When `PI_HOST_AUTO_REFRESH=true`, the Pi-dependent scripts first use the configured value if it answers on SSH. If that address goes stale, they scan the laptop's local `/24` and reuse the Pi whose SSH host key matches the old saved host key. For pure hostname discovery, set `PI_HOST=auto` and put the Pi's mDNS/DNS names in `PI_MDNS_HOSTS`, for example:
+| Variable | Meaning | Template default |
+| --- | --- | --- |
+| `PI_HOST` | Pi address, resolvable hostname, or `auto` | `auto` |
+| `PI_USER` | SSH user on the Pi | `user` |
+| `GO2_HOST` | Go2 address on the robot-side network | `192.168.123.18` |
+| `GO2_USER` | SSH user on the Go2 | `unitree` |
+
+`config/bridge.env` is ignored by Git. Keep passwords, private keys, and site-specific credentials out of this file; SSH handles authentication separately.
+
+#### Pi discovery
+
+With `PI_HOST=auto`, the scripts try the hostnames in `PI_MDNS_HOSTS`. If the laptop has connected to the Pi before, you can also supply one or more previous addresses whose saved SSH host keys identify it:
 
 ```bash
 PI_HOST=auto
 PI_MDNS_HOSTS="raspberrypi.local pi.local raspi.local"
+PI_KNOWN_HOSTS="<previous-pi-ip>"
 ```
 
-If mDNS is not available but this laptop has connected to the Pi before, use a previous Pi address as the key identity:
+With a fixed `PI_HOST` and `PI_HOST_AUTO_REFRESH=true`, a stale address can be replaced by scanning the laptop's active `/24` networks and matching the Pi's previously trusted SSH host key. The scan requires `ssh-keygen` and `ssh-keyscan`; hostname discovery may use `getent`, Avahi, or `host` when available.
 
-```bash
-PI_HOST=auto
-PI_KNOWN_HOSTS=10.133.241.86
-```
+Confirm SSH host fingerprints the first time each host is reached. The scripts use `StrictHostKeyChecking=accept-new`, which trusts a new host key but rejects a changed one.
 
-The default RViz display support enables the robot model, camera relay, point cloud relay, and Go2 joint TF relay:
-
-```bash
-GO2_CAMERA_ENABLE=false
-GO2_CAMERA_FPS=5
-GO2_JOINT_TF_ENABLE=true
-GO2_LOWSTATE_TOPICS=lowstate,lf/lowstate
-GO2_JOINT_TF_HZ=20.0
-GO2_VIDEO_ENABLE=false
-GO2_RVIZ_TF_MAX_HZ=20.0
-GO2_RVIZ_IMAGE_MAX_HZ=0.0
-GO2_RVIZ_POINTCLOUD_MAX_HZ=0.5
-ENABLE_GO2_MODEL=true
-```
-
-Keep `GO2_VIDEO_ENABLE=false`. The live camera is also disabled by default because it can saturate the Pi/hotspot SSH bridge. Set `GO2_CAMERA_ENABLE=true` only when you specifically need to inspect the camera feed.
-
-The robot model URDF path used by default is:
-
-```bash
-robot_description/go2/urdf/go2.urdf
-```
-
-If you want to use a different local Go2 URDF, set `GO2_URDF=/absolute/path/to/go2.urdf` in `config/bridge.env`.
-
-Install the GO2-side code from the laptop:
+### 3. Install the project on the Go2
 
 ```bash
 ./scripts/install_go2_project.sh
 ```
 
-This command copies `go2_navigation/` and `go2_scripts/` to the Go2 through the Pi, then runs:
+The installer:
+
+1. archives `go2_navigation/` and `go2_scripts/` locally;
+2. copies the archive to the Go2 through the Pi;
+3. replaces the deployed copy of the project's `go2_navigation` package; and
+4. runs `colcon build --symlink-install --packages-select go2_navigation` on the Go2.
+
+This deployment step deliberately replaces `/home/unitree/go2_navigation_project/src/go2_navigation`. Keep unrelated packages outside that directory.
+
+## Run the Project
+
+Use three laptop terminals. Start only one Go2 navigation mode at a time.
+
+### Terminal 1: open the SSH tunnels
 
 ```bash
-colcon build --symlink-install --packages-select go2_navigation
-```
-
-on the Go2.
-
-## Running Live Mapping Navigation
-
-Use three laptop terminals.
-
-### Terminal 1: open SSH tunnels
-
-```bash
-cd ~/go2-navigation-rviz-project
+cd indoor-inspection-robot
 ./scripts/start_tunnels.sh
 ```
 
-Leave this terminal open.
+Leave this process running. Stop it later with `Ctrl+C`; `scripts/stop_tunnels.sh` is a reminder helper and does not terminate another process.
 
-### Terminal 2: start laptop RViz receiver
+### Terminal 2: start the laptop receiver and RViz2
 
 ```bash
-cd ~/go2-navigation-rviz-project
+cd indoor-inspection-robot
 ./scripts/start_laptop_rviz.sh
 ```
 
-This starts `laptop_rviz_receiver.py` and opens RViz2 with `rviz/go2_navigation.rviz`.
-It also starts `go2_robot_model_publisher.py`, which publishes `/robot_description` and the fixed Go2 model transforms from `robot_description/go2/urdf/go2.urdf`. Moving leg joints come from the Go2-side LowState TF publisher.
+This starts the TCP receiver, publishes the local Go2 URDF and fixed transforms, and opens RViz2 with `rviz/go2_navigation.rviz`. Runtime logs are written under the ignored `logs/` directory.
 
-### Optional Terminal 2 Alternative: start laptop Isaac Sim viewer
+`scripts/start_all_laptop.sh` is a convenience alias for this step; it still expects the tunnel to be running in another terminal.
 
-Use this instead of `start_laptop_rviz.sh` when you want a 3D Isaac Sim view of the live mapping data:
-
-```bash
-cd ~/go2-navigation-rviz-project
-./scripts/start_laptop_isaacsim.sh
-```
-
-This starts the same `laptop_rviz_receiver.py` bridge and opens Isaac Sim with `isaac/go2_live_nav_viewer.py`. The Isaac viewer subscribes to `/map`, `/tf`, `/tf_static`, `/odom`, `/scan`, `/trans_cloud`, `/initialpose`, and `/goal_pose`.
-
-The Isaac viewer is for visualization only. It does not replace Nav2, SLAM Toolbox, or RViz goal tools. Keep RViz available when you need the normal **2D Pose Estimate** or **2D Goal Pose** click tools.
-
-### Terminal 3: start live mapping on the Go2
+### Terminal 3A: live mapping
 
 ```bash
-cd ~/go2-navigation-rviz-project
+cd indoor-inspection-robot
 ./scripts/start_go2_live_mapping_over_ssh.sh
 ```
 
-This launches:
+This starts Go2 base and perception packages, online asynchronous SLAM Toolbox, Nav2, joint TF publishing, and the TCP bridge.
 
-- `go2_core` base bringup
-- `go2_perception` point cloud processing
-- project-owned Go2 camera publishing on `/camera/image_raw` only if `GO2_CAMERA_ENABLE=true`
-- Go2 joint TF publishing from Unitree LowState
-- static transform `base_link -> base_footprint`
-- SLAM Toolbox online async mapping
-- Nav2 navigation
-- GO2 RViz TCP bridge
-
-In RViz or Isaac Sim, use `map` as the fixed frame. Wait until the map, TF, scan, point cloud, odometry, camera, and costmap displays start updating before sending goals.
-
-## Running Static Map Navigation
-
-Use the same first two terminals as live mapping.
-
-### Terminal 1
+### Terminal 3B: saved-map navigation
 
 ```bash
-cd ~/go2-navigation-rviz-project
-./scripts/start_tunnels.sh
-```
-
-### Terminal 2
-
-```bash
-cd ~/go2-navigation-rviz-project
-./scripts/start_laptop_rviz.sh
-```
-
-### Terminal 3
-
-```bash
-cd ~/go2-navigation-rviz-project
+cd indoor-inspection-robot
 ./scripts/start_go2_nav_over_ssh.sh
 ```
 
-The static launch file publishes the saved initial pose and performs the map server deactivate/activate cycle automatically. If the robot starts somewhere different from the saved pose, update the launch arguments or publish a new initial pose before sending goals.
+This starts AMCL and Nav2 with `go2_navigation/maps/room_map_toolbox.yaml`. The launch file publishes a saved initial pose and cycles the map server automatically. That map and pose are environment-specific: set a new pose in RViz before sending a goal whenever the robot is not starting at the recorded location.
 
-## Sending Goals From RViz
+### Optional: use the Isaac Sim viewer
 
-1. Confirm RViz fixed frame is `map`.
-2. Confirm TF contains `map`, `odom`, `base_link`, and `base_footprint`.
-3. Confirm `/scan`, `/trans_cloud`, `/odom`, and costmap displays are updating.
-4. Use the RViz **2D Goal Pose** tool to send a Nav2 goal.
-5. Watch the local costmap and robot footprint before allowing the robot to move near obstacles.
+Use this in terminal 2 instead of `start_laptop_rviz.sh`:
 
-Only run one navigation mode at a time. Do not run live mapping and static map localization together.
+```bash
+export ISAACSIM_ROOT="$HOME/isaacsim"
+./scripts/start_laptop_isaacsim.sh
+```
 
-## RViz Displays
+If Isaac Sim's ROS bridge is installed elsewhere, also set `ISAAC_ROS_BRIDGE_ROOT`. Extra viewer arguments are passed through, for example:
 
-The included RViz config enables these main displays:
+```bash
+./scripts/start_laptop_isaacsim.sh --headless --max-cloud-points 6000
+```
 
-| Display | Topic or Source | Message Type | Notes |
-| --- | --- | --- | --- |
-| Map | `/map` | `nav_msgs/OccupancyGrid` | Static map or live SLAM map. |
-| RobotModel | `/robot_description` | `std_msgs/String` URDF | Published locally by `scripts/go2_robot_model_publisher.py`. |
-| LaserScan | `/scan` | `sensor_msgs/LaserScan` | 2D scan used by Nav2. |
-| PointCloud | `/trans_cloud` | `sensor_msgs/PointCloud2` | Accumulated Go2 lidar point cloud. |
-| Go2Camera | `/camera/image_raw` | `sensor_msgs/Image` | Disabled by default because the live feed can lag the Pi/hotspot bridge. |
-| Odometry | `/odom` | `nav_msgs/Odometry` | Disabled by default in RViz but available. |
-| TF | `/tf`, `/tf_static` | `tf2_msgs/TFMessage` | Relayed from the robot plus local fixed model TF. Leg joint TF comes from Unitree LowState when available. |
+The Isaac viewer shows a lightweight robot marker, map, scan, point cloud, odometry/TF pose, and the latest initial/goal pose markers. It does not import the articulated Go2 model, provide RViz click tools, run Nav2, or control the robot.
 
-The underlying Go2 toolbox also exposes the raw deskewed lidar point cloud as `/utlidar/cloud_deskewed`. This repo displays `/trans_cloud` by default because it is the accumulated cloud already used by the navigation stack.
+## Configuration Reference
 
-The camera and point cloud are high-bandwidth topics. The camera is disabled by default, and the point cloud is relayed through the SSH tunnel with a conservative default limit of 0.5 Hz. Increase these values only if the network remains responsive.
+The checked-in template documents every setting. The most commonly tuned options are:
 
-The bridge also limits relayed `/tf` to 20 Hz and the Go2 joint TF publisher to 20 Hz. Higher rates can make the RobotModel look smoother on a strong wired network, but they often cause visible RViz freezing over the Pi/hotspot SSH route.
-
-## Isaac Sim Viewer
-
-The Isaac Sim viewer is a lightweight 3D mirror of the relayed laptop ROS graph:
-
-| Isaac Visual | Topic or Source | Notes |
+| Variable | Purpose | Default |
 | --- | --- | --- |
-| Live map | `/map` | Draws occupied and downsampled free occupancy-grid cells in the Isaac world. |
-| Robot pose marker | `/tf`, `/tf_static`, `/odom` | Follows `map -> base_link` when available, with odometry fallback. |
-| Laser scan | `/scan` | Draws transformed scan points in the `map` frame. |
-| Point cloud | `/trans_cloud` | Draws a capped/downsampled lidar cloud to avoid GPU/network lag. |
-| Pose markers | `/initialpose`, `/goal_pose` | Shows the latest initial pose and goal pose messages if they are published. |
+| `GO2_CAMERA_ENABLE` | Start the project camera publisher | `false` |
+| `GO2_CAMERA_FPS` | Camera capture target | `5` |
+| `GO2_JOINT_TF_ENABLE` | Publish leg TF from Unitree LowState | `true` |
+| `GO2_LOWSTATE_TOPICS` | Comma-separated LowState candidates | `lowstate,lf/lowstate` |
+| `GO2_JOINT_TF_HZ` | Joint TF publish limit | `20.0` |
+| `GO2_RVIZ_TF_MAX_HZ` | Relayed `/tf` rate limit | `20.0` |
+| `GO2_RVIZ_IMAGE_MAX_HZ` | Relayed camera rate limit; `0` means unlimited | `0.0` |
+| `GO2_RVIZ_POINTCLOUD_MAX_HZ` | Relayed `/trans_cloud` rate limit | `0.5` |
+| `ENABLE_GO2_MODEL` | Publish the laptop-side URDF and fixed TF | `true` |
+| `GO2_URDF` | Optional alternate local URDF path | repository URDF |
 
-The Isaac viewer does not currently import and animate the full articulated Go2 mesh. That is intentional for performance over the Pi relay; it gives a stable body pose marker, live map, scan, and point cloud without adding the camera-feed lag that RViz was showing.
+The legacy `go2_core` video path remains disabled because some Go2 installations do not include `video_stream_node.py`. This project uses its own camera publisher when `GO2_CAMERA_ENABLE=true`.
 
-## Stopping the Stack
+## Relayed ROS Data
 
-Stop in this order:
+| Display or function | Topic/source | Message type | Notes |
+| --- | --- | --- | --- |
+| Map | `/map` | `nav_msgs/OccupancyGrid` | Live SLAM or saved map |
+| Robot model | `/robot_description` | `std_msgs/String` | Published on the laptop from the included URDF |
+| Transforms | `/tf`, `/tf_static` | `tf2_msgs/TFMessage` | Robot TF plus laptop-side fixed model TF |
+| Laser scan | `/scan` | `sensor_msgs/LaserScan` | Used by localization and Nav2 |
+| Point cloud | `/trans_cloud` | `sensor_msgs/PointCloud2` | Accumulated Go2 point cloud |
+| Camera | `/camera/image_raw` | `sensor_msgs/Image` | Disabled by default to protect bridge bandwidth |
+| Odometry | `/odom` | `nav_msgs/Odometry` | Available but disabled by default in RViz |
+| Plans | `/plan`, `/local_plan` | `nav_msgs/Path` | Relayed when published by the stack |
+| Costmaps | global and local costmap topics | `nav_msgs/OccupancyGrid` | Relayed as transient-local data |
+| Operator commands | `/initialpose`, `/goal_pose` | geometry messages | Forwarded from the laptop to the Go2 |
 
-1. Press `Ctrl+C` in the GO2 navigation terminal.
-2. Press `Ctrl+C` in the RViz/laptop receiver terminal.
-3. Press `Ctrl+C` in the tunnel terminal.
+Use `map` as the RViz fixed frame. Before sending a goal, confirm that `map`, `odom`, `base_link`, and `base_footprint` are connected in TF and that `/scan`, `/odom`, and the costmaps are updating.
 
-## Common Troubleshooting
+## Safety and Security
+
+- Test in a clear, controlled area with an operator ready to stop the robot.
+- Confirm localization, footprint, costmaps, and the physical starting pose before enabling movement.
+- The included map, initial pose, and navigation tuning were captured for a specific indoor environment. Re-map and retune before using them elsewhere.
+- Run either live mapping or saved-map localization, never both at the same time.
+- Camera and point-cloud traffic can saturate a Pi or hotspot connection. Increase relay rates gradually while watching command latency.
+- The custom TCP protocol has no authentication or encryption of its own. Keep its endpoints on loopback as configured and carry it only through the SSH tunnels.
+- Do not expose ports `16000` or `16001` on an untrusted network.
+
+## Troubleshooting
 
 ### `Missing config/bridge.env`
 
-Create it from the template:
-
 ```bash
 cp config/bridge.env.example config/bridge.env
-nano config/bridge.env
+${EDITOR:-nano} config/bridge.env
 ```
 
 ### SSH cannot reach the Go2
 
-Test each hop:
+Test the hops separately after loading the local configuration. Set `PI_TEST_HOST` to the Pi's current address or resolvable hostname, even when the project uses automatic discovery:
 
 ```bash
-ssh ${PI_USER}@${PI_HOST}
-ssh -J ${PI_USER}@${PI_HOST} ${GO2_USER}@${GO2_HOST}
+source config/bridge.env
+PI_TEST_HOST=raspberrypi.local
+ssh "${PI_USER}@${PI_TEST_HOST}"
+ssh -J "${PI_USER}@${PI_TEST_HOST}" "${GO2_USER}@${GO2_HOST}"
 ```
 
-If the Pi IP changed, keep `PI_HOST_AUTO_REFRESH=true` and run the script again. If the laptop has previously SSHed to the Pi, the scripts can rediscover it by matching the saved SSH host key. If discovery fails, set `PI_HOST` to the current IP once or set `PI_HOST=auto` with the Pi's hostname in `PI_MDNS_HOSTS`.
+If `PI_HOST=auto`, test the resolved mDNS/DNS name directly or temporarily set the current address. Automatic key-based discovery works only when the Pi already has an entry in `~/.ssh/known_hosts`.
 
 ### `connect_to 127.0.0.1 port 16000: failed`
 
-The GO2 bridge is trying to send data through the reverse tunnel before the laptop receiver is listening. Start terminal 2 with:
+The reverse tunnel is active before the laptop receiver is listening. Start `./scripts/start_laptop_rviz.sh`; the warning should stop when the receiver accepts the connection.
 
-```bash
-./scripts/start_laptop_rviz.sh
-```
+### RViz reports missing `map` or TF data
 
-The warning should stop once the receiver is running.
+Confirm all three terminals are still running. In saved-map mode, AMCL needs a valid initial pose before it publishes `map -> odom`. In live mode, wait for SLAM Toolbox to publish that transform. Do not send goals until the TF tree is complete.
 
-### RViz says `No tf data` or `Frame [map] does not exist`
-
-Check that all three processes are running:
-
-- tunnel terminal
-- laptop RViz receiver terminal
-- GO2 navigation terminal
-
-Then check the GO2 terminal for bridge status lines such as:
+The Go2 bridge periodically prints status similar to:
 
 ```text
 data=connected, commands=waiting, relayed: /tf=...
 ```
 
-For static map navigation, AMCL cannot publish `map -> odom` until an initial pose is accepted. The static launch publishes the saved initial pose automatically after startup, but if the robot is not physically near that pose, publish a new initial pose from RViz or adjust the launch arguments.
+### The robot model is missing or its legs do not move
 
-### Robot model does not appear
+Check the laptop logs under `logs/` and verify the default URDF exists at `robot_description/go2/urdf/go2.urdf`. For an alternate model, set `GO2_URDF` in `config/bridge.env`.
 
-Check the laptop terminal for:
-
-```text
-Go2 robot model PID: ...
-Go2 URDF: ...
-```
-
-The default URDF path is:
-
-```bash
-robot_description/go2/urdf/go2.urdf
-```
-
-If that file is missing or you want a different model, set `GO2_URDF` in `config/bridge.env`. The laptop model publisher sends only fixed model transforms by default so the Go2-side LowState publisher can animate the moving joints.
-
-If the body moves but the legs stay locked, check the Go2 launch terminal for `go2_joint_tf_publisher.py`. It should log a line like `Using LowState topic for joint TF`. If it only logs `No LowState samples received yet`, run this on the Go2 to find the correct topic and put it in `GO2_LOWSTATE_TOPICS`:
+If the body appears but the legs remain neutral, inspect the Go2 terminal for `Using LowState topic for joint TF`. Find the correct topic with:
 
 ```bash
 ros2 topic list | grep lowstate
 ```
 
-### Camera feed does not appear
+Then update `GO2_LOWSTATE_TOPICS`.
 
-The wrappers keep the stock `go2_core` video path disabled because some Go2 installs do not include `video_stream_node.py` in the `go2_core` package:
+### The camera is missing or makes RViz lag
 
-```bash
-GO2_VIDEO_ENABLE=false
-GO2_CAMERA_ENABLE=false
-GO2_CAMERA_FPS=5
-```
-
-To temporarily enable the camera, set `GO2_CAMERA_ENABLE=true` and restart the Go2 launch. Verify the Go2 launch terminal shows `go2_camera_image_publisher.py` and then check the bridge status includes `/camera/image_raw`. If the hotspot is overloaded, disable the camera again or lower the image relay rate:
+The camera is off by default. Enable it explicitly and restart the Go2 mode:
 
 ```bash
+GO2_CAMERA_ENABLE=true
 GO2_RVIZ_IMAGE_MAX_HZ=2.0
 ```
 
-### Point cloud does not appear
+If the stream is still absent, inspect the Go2 output for GStreamer errors and verify its RTP/H.264 plugins. If commands or RViz become sluggish, disable the camera or lower both the capture and relay rates.
 
-The RViz display uses `/trans_cloud`. Confirm the GO2 terminal shows `cloud_accumulation` and `pointcloud_to_laserscan_node` running, and check bridge status for `/trans_cloud`. If the point cloud causes lag, lower:
+### The point cloud is missing or saturates the link
+
+The RViz config uses `/trans_cloud`. Confirm the Go2 perception stack is publishing that topic and check the bridge status. To reduce bandwidth further, use a lower positive limit, for example:
 
 ```bash
-GO2_RVIZ_POINTCLOUD_MAX_HZ=1.0
+GO2_RVIZ_POINTCLOUD_MAX_HZ=0.25
 ```
 
-### RViz data appears but goals do not move the robot
+### Goals appear in RViz but the robot does not move
 
-Confirm the GO2 bridge is receiving commands. The bridge opens the command channel on `127.0.0.1:16001` through the SSH tunnel. Also confirm Nav2 lifecycle nodes are active in the GO2 terminal.
-
-### The robot pose slides in the map while turning
-
-Small corrections are normal when localization or SLAM reconciles leg odometry with scan data. Large sliding during turns usually means one of these is off:
-
-- scan frame timing or TF timing
-- AMCL motion model tuning
-- insufficient scan matching features during turns
-- starting pose mismatch
-- wheel/leg odometry drift during spin recovery
-
-Use live mapping in feature-rich areas when possible, reduce aggressive spin recovery speeds, and avoid sending goals before TF and scans are stable.
+Verify the command channel on port `16001`, confirm that the `navigate_to_pose` action server is available on the Go2, and check that Nav2 lifecycle nodes are active.
 
 ### `AMENT_TRACE_SETUP_FILES: unbound variable`
 
-This happens when `set -u` is active before sourcing ROS setup files. The included scripts source ROS first and enable `set -u` afterward on the GO2-side wrappers. If this appears in a modified script, move `set -u` after the ROS `source` commands.
+ROS setup files may reference unset variables. Source ROS and workspace setup files before enabling `set -u`, as the included Go2 wrappers do.
 
-### `Message Filter dropping message: EmptyFrameID`
+### Persistent `EmptyFrameID` or transform timeout warnings
 
-This can happen briefly during point cloud processing startup. If it persists, check the Go2 perception launch and confirm the point cloud has a valid frame before conversion to `/scan`.
+Verify that the perception stack publishes a valid frame on `/scan` and `/trans_cloud`, then confirm the corresponding transform chain. Brief startup warnings can be normal; persistent warnings indicate missing or mistimed TF data.
 
-### `Timed out waiting for transform from base_link to map`
+## Development Checks
 
-For static map mode, wait for AMCL to accept the initial pose. For live mapping mode, wait for SLAM Toolbox to start publishing `map -> odom`. Do not send goals until the transform tree is complete.
-
-### Live mapping map does not update
-
-Confirm SLAM Toolbox is installed on the Go2:
+The repository does not include hardware-independent integration tests. Useful lightweight checks are:
 
 ```bash
-ros2 pkg prefix slam_toolbox
+python3 -m compileall scripts go2_navigation isaac
+find scripts go2_scripts -name '*.sh' -print0 | xargs -0 -n1 bash -n
 ```
 
-Confirm `/scan` is publishing and that TF includes the scan source frame, `base_link`, `base_footprint`, and `odom`.
+On a configured ROS 2 system, build the package with:
 
-## Notes
+```bash
+colcon build --packages-select go2_navigation
+```
 
-- This repository stores project-owned glue code and configuration, not third-party dependencies.
-- Keep `config/bridge.env` local.
-- Keep passwords in your password manager or enter them interactively at SSH prompts.
-- The current static map is included under `go2_navigation/maps/`.
+Hardware validation should cover both navigation modes, tunnel reconnection, TF completeness, initial-pose handling, goal forwarding, and emergency-stop behavior.
 
-## Credits and Third-Party Dependencies
+## License and Third-Party Software
 
-This project was built on top of the ROS 2 and Unitree Go2 ecosystem. The main third-party projects used by this navigation workflow are credited in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+No repository-wide license has been declared for the project-owned code. Derived portions of `go2_navigation/` and the Go2 visualization assets retain their respective upstream MIT notices. Dependency credits, file-level provenance, and license locations are documented in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-Open source code still has license requirements. This repository does not store full third-party source trees, but any upstream files copied or adapted into this project should retain their original notices and follow their upstream licenses.
+Before redistributing or reusing the project-owned code, add or obtain an explicit license from the repository owner and continue to honor all third-party notices.

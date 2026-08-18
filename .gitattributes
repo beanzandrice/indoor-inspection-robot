@@ -1,0 +1,22 @@
+* text=auto
+
+# Keep executable source/config files usable on Linux even when contributors
+# work from Windows.
+*.sh text eol=lf
+*.py text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.xml text eol=lf
+*.urdf text eol=lf
+*.rviz text eol=lf
+*.md text eol=lf
+*.dae text eol=lf
+*.txt text eol=lf
+*.env.example text eol=lf
+.gitignore text eol=lf
+.gitattributes text eol=lf
+CMakeLists.txt text eol=lf
+*LICENSE text eol=lf
+
+# Occupancy-grid image data is binary.
+*.pgm binary

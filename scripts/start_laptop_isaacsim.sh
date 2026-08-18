@@ -3,7 +3,7 @@ set -eo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="${ROOT_DIR}/config/bridge.env"
-ISAACSIM_ROOT="${ISAACSIM_ROOT:-/home/nortiz01/isaacsim}"
+ISAACSIM_ROOT="${ISAACSIM_ROOT:-${HOME}/isaacsim}"
 ISAAC_ROS_BRIDGE_ROOT="${ISAAC_ROS_BRIDGE_ROOT:-${ISAACSIM_ROOT}/exts/isaacsim.ros2.bridge/humble}"
 
 if [[ ! -f "${ENV_FILE}" ]]; then
